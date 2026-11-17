@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>توزيع المهام</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f3ee;--card:#ffffff;--ink:#1d2026;--muted:#6b7079;--line:#e7e3da;
+  --accent:#5b4cf0;--accent-ink:#fff;--accent-soft:#eeecff;
+  --ok:#15a05a;--ok-soft:#e5f6ec;--warn:#c97a06;--warn-soft:#fff3dd;--danger:#d63a3a;--danger-soft:#fdeaea;
+  --radius:18px;--shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#131418;--card:#1d1f25;--ink:#eceef2;--muted:#9aa0aa;--line:#2c2f37;
+  --accent:#8f86ff;--accent-ink:#111;--accent-soft:#25264a;
+  --ok:#4ade80;--ok-soft:#173223;--warn:#fbbf24;--warn-soft:#3a2f16;--danger:#f87171;--danger-soft:#3a1d1d;
+  --shadow:none;
+}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:Cairo,system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+.wrap{max-width:760px;margin:0 auto;padding:0 14px 90px}
+header.top{padding:18px 2px 12px}
+.brand{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.brand h1{font-size:24px;font-weight:800;margin:0}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:2px 10px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.gbar{height:14px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:14px}
+.gbar-fill{height:100%;border-radius:99px;background:linear-gradient(270deg,var(--accent),#c04cf0);transition:width .5s ease}
+.gstats{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:6px;gap:8px}
+.gstats b{color:var(--ink)}
+nav.tabs{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--bg);padding:8px 0 10px}
+.tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:0;padding:8px 4px;border-radius:14px;text-decoration:none;color:var(--muted);font-size:13px;font-weight:700}
+.tab .ti{font-size:20px;line-height:1.2}
+.tab.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow);outline:1px solid var(--line)}
+.badge{position:absolute;top:3px;inset-inline-start:calc(50% + 10px);min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--accent);color:var(--accent-ink);font-size:11px;display:flex;align-items:center;justify-content:center}
+.badge.dot{min-width:10px;width:10px;height:10px;padding:0;top:6px;inset-inline-start:calc(50% + 8px);background:var(--ok)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:12px}
+.card.hero{border:2px solid var(--accent);padding:18px}
+.card h2{margin:0 0 4px;font-size:20px}
+.card h3{margin:0 0 2px;font-size:17px}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 2px 10px}
+.sec h2{font-size:17px;margin:0}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.desc{white-space:pre-wrap;margin:6px 0 0;color:var(--ink);opacity:.9}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-top:8px}
+.av{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:none;background:var(--line)}
+.av.lg{width:36px;height:36px;font-size:16px}
+.av.ini{display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;line-height:1}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1;min-width:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.btn{appearance:none;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:8px 14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;justify-content:center;min-height:44px;text-decoration:none}
+.btn:active{transform:scale(.98)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--danger);border-color:var(--danger-soft);background:var(--danger-soft)}
+.btn.armed{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn.sm{min-height:36px;padding:4px 10px;font-size:14px;border-radius:10px}
+.btn.block{width:100%}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.pbar{height:10px;border-radius:99px;background:var(--line);overflow:hidden}
+.pbar>div{height:100%;background:var(--accent);border-radius:99px;transition:width .3s}
+.pbar.done>div{background:var(--ok)}
+.pbig{display:flex;align-items:baseline;justify-content:space-between;margin:16px 0 8px}
+.pbig .pct{font-size:34px;font-weight:800;direction:ltr}
+input[type=range]{width:100%;accent-color:var(--accent);height:32px;margin:6px 0 2px}
+.quick{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.quick .btn{min-height:38px;padding:4px;font-size:14px;direction:ltr}
+.quick .btn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+label.lbl{display:block;font-weight:800;margin:18px 0 6px}
+textarea,input[type=text],input[type=password]{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:12px;resize:vertical;outline:none}
+textarea:focus,input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
+textarea{min-height:120px}
+.savestate{font-size:12px;color:var(--muted);margin-top:4px;min-height:18px}
+.savestate.dirty{color:var(--warn)}
+details{margin-top:10px}
+summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--accent);list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"◂ ";}
+details[open] summary::before{content:"▾ ";}
+.notes{white-space:pre-wrap;background:var(--bg);border-radius:12px;padding:10px 12px;margin-top:8px;font-size:15px}
+.empty{text-align:center;padding:30px 16px}
+.empty .big{font-size:44px}
+.banner{border-radius:14px;padding:10px 14px;margin:0 0 12px;font-size:14px;background:var(--warn-soft);color:var(--warn)}
+.lead{display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center}
+.medal{font-size:20px;width:26px;text-align:center}
+.icon-btn{appearance:none;border:none;background:transparent;padding:6px;border-radius:8px;cursor:pointer;font-size:16px;color:var(--muted)}
+.icon-btn:hover{background:var(--bg)}
+.resume{display:inline-block;margin-top:8px;font-size:13px;font-weight:700;color:var(--warn);background:var(--warn-soft);padding:2px 10px;border-radius:99px}
+.mask{position:fixed;inset:0;background:rgba(10,10,20,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50;animation:fade .15s}
+@media (min-width:640px){.mask{align-items:center}}
+.sheet{background:var(--card);width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:20px 18px 24px;max-height:92vh;overflow:auto;animation:up .2s ease}
+@media (min-width:640px){.sheet{border-radius:22px}}
+.sheet h2{margin:0 0 4px}
+@keyframes up{from{transform:translateY(30px);opacity:.4}}
+@keyframes fade{from{opacity:0}}
+.dice{font-size:22px;font-weight:800;text-align:center;padding:26px 10px;border-radius:16px;background:var(--accent-soft);color:var(--accent);margin:14px 0;min-height:96px;display:flex;align-items:center;justify-content:center}
+.dice.land{background:var(--ok-soft);color:var(--ok);animation:pop .35s}
+@keyframes pop{50%{transform:scale(1.05)}}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(120px);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:14px;font-weight:700;font-size:15px;max-width:92vw;transition:transform .25s;z-index:60;text-align:center}
+#toast.show{transform:translateX(-50%) translateY(0)}
+.confetti{position:fixed;top:-30px;font-size:26px;z-index:70;pointer-events:none;animation:fall 1.8s ease-in forwards}
+@keyframes fall{to{transform:translateY(105vh) rotate(540deg);opacity:.7}}
+.skeleton{height:90px;border-radius:var(--radius);background:linear-gradient(90deg,var(--card),var(--line),var(--card));background-size:200% 100%;animation:sh 1.2s infinite;margin-bottom:12px}
+@keyframes sh{to{background-position:-200% 0}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="modal"></div>
+<div id="toast"></div>
+<script>
+(() => {
+"use strict";
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k === "style") el.setAttribute("style", v);
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else if (k === "value" || k === "checked" || k === "disabled" || k === "open") el[k] = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    el.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+function ago(ms) {
+  if (!ms) return "";
+  const s = (Date.now() - ms) / 1000;
+  if (s < 60) return "الآن";
+  if (s < 3600) return `منذ ${Math.floor(s / 60)} دقيقة`;
+  if (s < 86400) return `منذ ${Math.floor(s / 3600)} ساعة`;
+  const d = Math.floor(s / 86400);
+  if (d < 7) return `منذ ${d} يوم`;
+  return "في " + new Date(ms).toLocaleDateString("ar-u-nu-latn", { day: "numeric", month: "long" });
+}
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+}
+function confetti() {
+  const em = ["🎉", "✨", "⭐", "🥳", "💪", "✅"];
+  for (let i = 0; i < 22; i++) {
+    const s = h("span", { class: "confetti", text: em[i % em.length],
+      style: `left:${Math.random() * 100}vw;animation-delay:${Math.random() * .5}s;font-size:${18 + Math.random() * 18}px` });
+    document.body.append(s); setTimeout(() => s.remove(), 2600);
+  }
+}
+
+/* ---------- state ---------- */
+const S = {
+  me: null, myId: null, isAdmin: false, canWrite: true, joinCode: "",
+  tasks: [], users: {}, userList: [], loaded: false, stale: false, error: null, authed: null,
+  drafts: {}, saving: {}, armed: null, dragging: false, renderQueued: false,
+};
+const ERR = {
+  not_logged_in: "انتهت الجلسة، سجّل الدخول من جديد.", bad_credentials: "اسم المستخدم أو كلمة المرور غير صحيحة.",
+  bad_join_code: "رمز الانضمام غير صحيح.", registration_closed: "التسجيل مغلق حالياً. اطلب من المسؤول إنشاء حساب لك.",
+  bad_username: "اسم المستخدم: 3 أحرف على الأقل (حروف لاتينية صغيرة، أرقام، . _ -).", bad_name: "اكتب اسمك.",
+  short_password: "كلمة المرور: 6 أحرف على الأقل.", username_taken: "اسم المستخدم هذا مستخدم من قبل.",
+  already_taken: "تأخرت، لقد أُخذت للتو!", has_current_task: "أنهِ مهمتك الحالية أولاً 😉",
+  not_allowed: "لا يمكن تنفيذ هذا الإجراء (ربما تغيّرت المهمة).", admin_only: "هذا الإجراء للمسؤول فقط.",
+  title_required: "أعطِ المهمة عنواناً", cannot_delete_self: "لا يمكنك حذف حسابك.", cannot_change_self: "لا يمكنك تغيير صلاحياتك.",
+};
+async function api(method, url, body) {
+  const opt = { method, credentials: "same-origin", headers: {} };
+  if (method !== "GET") { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body || {}); }
+  let r;
+  try { r = await fetch(url, opt); } catch (e) { const er = new Error("network"); er.code = "network"; throw er; }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const er = new Error(data.error || "server_error"); er.code = data.error || "server_error"; er.status = r.status; throw er; }
+  return data;
+}
+function errMsg(e) {
+  const c = e && e.code;
+  if (c === "network") return "الاتصال غير مستقر، حاول بعد قليل.";
+  return ERR[c] || "حدث خطأ، حاول مجدداً.";
+}
+const TABS = [
+  { id: "my-task", label: "مهمتي", icon: "🎯" },
+  { id: "pool", label: "المتاحة", icon: "🎲" },
+  { id: "team", label: "الفريق", icon: "👥" },
+  { id: "ideas", label: "أفكار", icon: "💡" },
+];
+const currentTab = () => (TABS.find(t => "#" + t.id === location.hash) || TABS[0]).id;
+const byStatus = s => S.tasks.filter(t => t.status === s);
+const myCurrent = () => S.myId ? S.tasks.find(t => t.status === "taken" && t.assignee === S.myId) : null;
+const pct = t => t.status === "done" ? 100 : Math.max(0, Math.min(100, Math.round(+t.progress || 0)));
+const P = v => "⁦" + v + "%⁩"; // isolé LTR pour l’affichage RTL
+
+function nameOf(id) {
+  if (!id) return "—";
+  const u = S.users[id];
+  const n = (u && u.display_name) || "عضو سابق";
+  return id === S.myId ? n + " (أنا)" : n;
+}
+function avatar(id, lg) {
+  const u = S.users[id];
+  const n = ((u && u.display_name) || "؟").trim();
+  return h("span", { class: "av ini" + (lg ? " lg" : ""), style: `background:hsl(${(id * 67) % 360} 65% 48%)` }, n.charAt(0) || "؟");
+}
+
+/* ---------- writes (one at a time per doc) ---------- */
+const queues = {};
+function serial(id, fn) {
+  const run = (queues[id] || Promise.resolve()).then(fn, fn);
+  queues[id] = run.catch(() => {});
+  return run;
+}
+async function write(id, fn, okMsg) {
+  try { await serial(id, fn); if (okMsg) toast(okMsg); refresh(); return true; }
+  catch (e) {
+    if (e && e.code === "not_logged_in") { S.authed = false; render(); }
+    toast(errMsg(e)); refresh();
+    return false;
+  }
+}
+
+/* two-tap confirmation */
+function armed(key, label, armedLabel, onGo, cls) {
+  const on = S.armed === key;
+  return h("button", { class: "btn sm " + (on ? "armed" : (cls || "ghost")), onclick: () => {
+    if (S.armed === key) { S.armed = null; onGo(); }
+    else { S.armed = key; render(); setTimeout(() => { if (S.armed === key) { S.armed = null; render(); } }, 3500); }
+  } }, on ? armedLabel : label);
+}
+
+/* ---------- actions ---------- */
+async function take(taskId) {
+  if (myCurrent()) { location.hash = "#my-task"; return toast("أنهِ مهمتك الحالية أولاً 😉"); }
+  const ok = await write(taskId, () => api("POST", `/api/tasks/${taskId}/take`));
+  if (ok) { toast("انطلق! 🚀"); location.hash = "#my-task"; }
+}
+async function setProgress(t, v) {
+  v = Math.max(0, Math.min(100, Math.round(v)));
+  if (v === pct(t)) return;
+  t.progress = v; render();
+  await write(t.id, () => api("POST", `/api/tasks/${t.id}/progress`, { progress: v }));
+}
+async function saveNotes(t) {
+  const v = S.drafts[t.id];
+  if (v === undefined) return;
+  if (v === (t.notes || "")) { delete S.drafts[t.id]; updateSaveState(t.id); return; }
+  S.saving[t.id] = true; updateSaveState(t.id);
+  const ok = await write(t.id, () => api("POST", `/api/tasks/${t.id}/notes`, { notes: v.slice(0, 8000) }));
+  if (ok) t.notes = v.slice(0, 8000);
+  S.saving[t.id] = false;
+  if (ok && S.drafts[t.id] === v) delete S.drafts[t.id];
+  updateSaveState(t.id);
+}
+const noteTimers = {};
+function onNoteInput(t, el) {
+  S.drafts[t.id] = el.value; updateSaveState(t.id);
+  clearTimeout(noteTimers[t.id]);
+  noteTimers[t.id] = setTimeout(() => saveNotes(t), 1500);
+}
+function updateSaveState(id) {
+  const el = document.querySelector(`[data-save="${id}"]`);
+  if (!el) return;
+  if (S.saving[id]) { el.textContent = "جارٍ الحفظ…"; el.className = "savestate"; }
+  else if (S.drafts[id] !== undefined) { el.textContent = "● تعديلات غير محفوظة"; el.className = "savestate dirty"; }
+  else { el.textContent = "✓ محفوظ — يراه كل الفريق"; el.className = "savestate"; }
+}
+async function finish(t) {
+  if (S.drafts[t.id] !== undefined) await saveNotes(t);
+  const ok = await write(t.id, () => api("POST", `/api/tasks/${t.id}/finish`));
+  if (ok) { confetti(); toast("أحسنت! يمكنك سحب المهمة التالية 🎲"); location.hash = "#pool"; }
+}
+async function release(t) {
+  if (S.drafts[t.id] !== undefined && t.assignee === S.myId) await saveNotes(t);
+  await write(t.id, () => api("POST", `/api/tasks/${t.id}/release`), "أُعيدت المهمة إلى المهام المتاحة");
+}
+async function approve(t) { await write(t.id, () => api("POST", `/api/tasks/${t.id}/approve`), "تم قبول الاقتراح ✓"); }
+async function remove(t, msg) { await write(t.id, () => api("DELETE", `/api/tasks/${t.id}`), msg || "حُذفت"); }
+async function reopen(t) { await write(t.id, () => api("POST", `/api/tasks/${t.id}/reopen`), "أُعيد فتح المهمة"); }
+
+/* ---------- modals ---------- */
+function closeModal() { $("#modal").replaceChildren(); }
+function modal(content) {
+  const mask = h("div", { class: "mask", onclick: e => { if (e.target === mask) closeModal(); } }, h("div", { class: "sheet" }, content));
+  $("#modal").replaceChildren(mask);
+  return mask;
+}
+function openTaskForm(mode, t) {
+  // mode: "propose" | "add" | "edit"
+  const title = h("input", { type: "text", maxlength: "140", placeholder: "مثال: تحضير جدول عمل الأسبوع", value: t ? t.title : "" });
+  const desc = h("textarea", { maxlength: "2000", placeholder: "تفاصيل، تعليمات، روابط مفيدة… (اختياري)", value: t ? (t.desc || "") : "" });
+  const heading = mode === "edit" ? "تعديل المهمة" : mode === "add" ? "مهمة جديدة" : "اقتراح مهمة";
+  const hint = mode === "propose" && !S.isAdmin ? "سيرى الجميع اقتراحك، وسيقبله المسؤول لينضم إلى المهام المتاحة."
+    : mode === "add" ? "ستنضم مباشرة إلى المهام المتاحة." : "";
+  const submit = h("button", { class: "btn primary block", type: "submit" }, mode === "edit" ? "حفظ" : mode === "add" ? "إضافة إلى المهام المتاحة" : "إرسال الاقتراح");
+  const form = h("form", { onsubmit: async e => {
+    e.preventDefault();
+    const tt = title.value.trim();
+    if (!tt) { title.focus(); return toast("أعطِ المهمة عنواناً"); }
+    submit.disabled = true;
+    let ok;
+    if (mode === "edit") {
+      ok = await write(t.id, () => api("PATCH", `/api/tasks/${t.id}`, { title: tt, desc: desc.value.trim() }), "عُدّلت ✓");
+    } else {
+      ok = await write("new", () => api("POST", "/api/tasks", { title: tt, desc: desc.value.trim() }),
+        S.isAdmin ? "أُضيفت إلى المهام المتاحة 🎲" : "أُرسل الاقتراح 💡");
+    }
+    if (ok) closeModal(); else submit.disabled = false;
+  } },
+    h("h2", {}, heading),
+    hint ? h("p", { class: "muted small", style: "margin:0" }, hint) : null,
+    h("label", { class: "lbl" }, "العنوان"), title,
+    h("label", { class: "lbl" }, "الوصف"), desc,
+    h("div", { class: "btns" }, submit, h("button", { class: "btn ghost block", type: "button", onclick: closeModal }, "إلغاء")));
+  modal(form);
+  setTimeout(() => title.focus(), 50);
+}
+function randomPick() {
+  const pool = byStatus("open");
+  if (!pool.length) return toast("لا توجد مهام متاحة!");
+  if (myCurrent()) { location.hash = "#my-task"; return toast("أنهِ مهمتك الحالية أولاً 😉"); }
+  const box = h("div", { class: "dice" }, "🎲");
+  const actions = h("div", { class: "btns" });
+  const sheet = h("div", {}, h("h2", {}, "سحب عشوائي"), h("p", { class: "muted small", style: "margin:0" }, `عدد المهام المتاحة: ${pool.length}`), box, actions);
+  modal(sheet);
+  let n = 0; const chosen = pool[Math.floor(Math.random() * pool.length)];
+  const spin = setInterval(() => {
+    box.textContent = pool[n++ % pool.length].title;
+    if (n > 14) {
+      clearInterval(spin);
+      box.textContent = chosen.title; box.classList.add("land");
+      actions.replaceChildren(
+        h("button", { class: "btn primary", onclick: () => { closeModal(); take(chosen.id); } }, "سآخذها! ✋"),
+        h("button", { class: "btn", onclick: () => { closeModal(); randomPick(); } }, "أعد السحب 🎲"),
+        h("button", { class: "btn ghost", onclick: closeModal }, "إغلاق"));
+    }
+  }, 70);
+}
+
+/* ---------- views ---------- */
+function stats() {
+  const active = S.tasks.filter(t => t.status === "open" || t.status === "taken" || t.status === "done");
+  const total = active.length, done = active.filter(t => t.status === "done").length;
+  const p = total ? Math.round(active.reduce((a, t) => a + (t.status === "open" ? 0 : pct(t)), 0) / total) : 0;
+  return { total, done, p };
+}
+function pbar(t) { const v = pct(t); return h("div", { class: "pbar" + (v >= 100 ? " done" : "") }, h("div", { style: `width:${v}%` })); }
+
+function taskMeta(t) {
+  return h("div", { class: "meta" },
+    t.proposedBy ? [avatar(t.proposedBy), h("span", {}, `${t.status === "proposed" ? "اقترحها" : "أضافها"} ${nameOf(t.proposedBy)}`)] : null,
+    t.createdAt ? h("span", {}, "· " + ago(t.createdAt)) : null);
+}
+
+function viewMine() {
+  const t = myCurrent();
+  const out = [];
+  if (!S.myId) {
+    out.push(h("div", { class: "card empty" }, h("div", { class: "big" }, "🔒"), h("p", {}, "سجّل الدخول لسحب المهام وملء قسمك.")));
+  } else if (!t) {
+    const n = byStatus("open").length;
+    out.push(h("div", { class: "card empty" },
+      h("div", { class: "big" }, "🎯"),
+      h("h2", {}, "لا توجد مهمة جارية"),
+      h("p", { class: "muted" }, n ? `مهام بانتظارك: ${n}` : "لا توجد مهام متاحة حالياً. اقترح مهمة!"),
+      h("div", { class: "btns", style: "justify-content:center" },
+        n ? h("button", { class: "btn primary", onclick: randomPick, disabled: !S.canWrite }, "🎲 سحب عشوائي") : null,
+        n ? h("a", { class: "btn", href: "#pool" }, "اختر من القائمة") : h("button", { class: "btn primary", onclick: () => openTaskForm(S.isAdmin ? "add" : "propose") }, "💡 اقتراح مهمة"))));
+  } else {
+    const v = pct(t);
+    const fill = h("div", { style: `width:${v}%` });
+    const bar = h("div", { class: "pbar" + (v >= 100 ? " done" : "") }, fill);
+    const num = h("span", { class: "pct" }, P(v));
+    const range = h("input", { type: "range", min: "0", max: "100", step: "5", value: String(v), "data-key": "range-" + t.id, "aria-label": "التقدم",
+      oninput: e => { const x = +e.target.value; num.textContent = P(x); fill.style.width = x + "%"; bar.className = "pbar" + (x >= 100 ? " done" : ""); },
+      onpointerdown: () => { S.dragging = true; },
+      onchange: e => { S.dragging = false; setProgress(t, +e.target.value); if (S.renderQueued) { S.renderQueued = false; scheduleRender(); } } });
+    const quick = h("div", { class: "quick" }, [0, 25, 50, 75, 100].map(q => h("button", { class: "btn" + (v === q ? " on" : ""), onclick: () => setProgress(t, q) }, P(q))));
+    const ta = h("textarea", { "data-key": "notes-" + t.id, placeholder: "ما أنجزته، أين وصلت المهمة، روابط، صعوبات، معلومات للزملاء…",
+      value: S.drafts[t.id] !== undefined ? S.drafts[t.id] : (t.notes || ""),
+      oninput: e => onNoteInput(t, e.target), onblur: () => { clearTimeout(noteTimers[t.id]); saveNotes(t); } });
+    out.push(h("div", { class: "card hero" },
+      h("div", { class: "row" }, h("span", { class: "chip" }, "جارية"), h("span", { class: "muted small" }, "أُخذت " + ago(t.takenAt))),
+      h("h2", { style: "margin-top:10px" }, t.title),
+      t.desc ? h("p", { class: "desc" }, t.desc) : null,
+      taskMeta(t),
+      h("div", { class: "pbig" }, h("strong", {}, "نسبة الإنجاز"), num), bar, range, quick,
+      h("label", { class: "lbl" }, "📝 قسمي"),
+      ta, h("div", { class: "savestate", "data-save": t.id }),
+      h("div", { class: "btns" },
+        h("button", { class: "btn ok", style: "flex:1", onclick: () => finish(t) }, v >= 100 ? "✓ إنهاء — اكتملت!" : "✓ تحديدها كمنجزة"),
+        armed("rel-" + t.id, "إعادتها إلى المتاحة", "متأكد؟ اضغط مجدداً", () => release(t)))));
+  }
+  const mineDone = S.myId ? S.tasks.filter(x => x.status === "done" && x.assignee === S.myId).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)) : [];
+  if (mineDone.length) {
+    out.push(h("div", { class: "sec" }, h("h2", {}, `مهامي المنجزة (${mineDone.length})`)));
+    for (const d of mineDone) {
+      const ta = h("textarea", { "data-key": "notes-" + d.id, value: S.drafts[d.id] !== undefined ? S.drafts[d.id] : (d.notes || ""),
+        oninput: e => onNoteInput(d, e.target), onblur: () => { clearTimeout(noteTimers[d.id]); saveNotes(d); } });
+      const ae = document.activeElement;
+      out.push(h("div", { class: "card" },
+        h("div", { class: "row" }, h("span", {}, "✅"), h("h3", { class: "grow" }, d.title), h("span", { class: "muted small" }, ago(d.doneAt))),
+        h("details", { open: S.drafts[d.id] !== undefined || (ae && ae.dataset && ae.dataset.key === "notes-" + d.id) }, h("summary", {}, "إكمال معلوماتي"), ta, h("div", { class: "savestate", "data-save": d.id }))));
+    }
+  }
+  return out;
+}
+
+function viewPool() {
+  const pool = byStatus("open").sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const cur = myCurrent();
+  const out = [h("div", { class: "sec" },
+    h("h2", {}, `المهام المتاحة (${pool.length})`),
+    h("div", { class: "row" },
+      S.isAdmin ? h("button", { class: "btn sm", onclick: () => openTaskForm("add") }, "＋ إضافة") : h("button", { class: "btn sm", onclick: () => openTaskForm("propose") }, "💡 اقتراح"),
+      pool.length ? h("button", { class: "btn sm primary", onclick: randomPick, disabled: !S.canWrite || !S.myId }, "🎲 عشوائي") : null))];
+  if (cur) out.push(h("div", { class: "banner" }, "لديك مهمة جارية: ", h("b", {}, cur.title), ". أنهِها لتسحب مهمة أخرى."));
+  if (!pool.length) {
+    out.push(h("div", { class: "card empty" }, h("div", { class: "big" }, "🫙"), h("h2", {}, "لا توجد مهام متاحة"),
+      h("p", { class: "muted" }, S.isAdmin ? "أضف مهاماً للفريق، أو اقبل الأفكار المقترحة." : "اقترح مهمة: سيقبلها المسؤول.")));
+  }
+  for (const t of pool) {
+    out.push(h("div", { class: "card" },
+      h("div", { class: "row", style: "align-items:flex-start" },
+        h("div", { class: "grow" }, h("h3", {}, t.title), t.desc ? h("p", { class: "desc small" }, t.desc) : null),
+        S.isAdmin ? h("button", { class: "icon-btn", title: "تعديل", "aria-label": "تعديل", onclick: () => openTaskForm("edit", t) }, "✏️") : null),
+      (pct(t) > 0 || t.notes) ? h("span", { class: "resume" }, `↺ استئناف: أُنجز ${P(pct(t))}` + (t.notes ? " · توجد ملاحظات" : "")) : null,
+      t.notes ? h("details", {}, h("summary", {}, "عرض الملاحظات السابقة"), h("div", { class: "notes" }, t.notes)) : null,
+      taskMeta(t),
+      h("div", { class: "btns" },
+        h("button", { class: "btn primary", style: "flex:1", disabled: !!cur || !S.canWrite || !S.myId, onclick: () => take(t.id) }, "✋ سحب هذه المهمة"),
+        S.isAdmin ? armed("del-" + t.id, "حذف", "حذف؟", () => remove(t), "danger") : null)));
+  }
+  return out;
+}
+
+function viewTeam() {
+  const taken = byStatus("taken").sort((a, b) => pct(b) - pct(a));
+  const done = byStatus("done").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+  const out = [h("div", { class: "sec" }, h("h2", {}, `مهام جارية (${taken.length})`))];
+  if (!taken.length) out.push(h("div", { class: "card empty" }, h("p", { class: "muted", style: "margin:0" }, "لا أحد لديه مهمة جارية حالياً.")));
+  for (const t of taken) {
+    out.push(h("div", { class: "card" },
+      h("div", { class: "row" }, avatar(t.assignee, true), h("div", { class: "grow" }, h("strong", {}, nameOf(t.assignee)), h("div", { class: "muted small" }, ago(t.takenAt))),
+        h("strong", { style: "direction:ltr" }, P(pct(t)))),
+      h("h3", { style: "margin:12px 0 8px" }, t.title),
+      pbar(t),
+      h("details", { open: !!t.notes && taken.length <= 3 }, h("summary", {}, "قسمه"),
+        h("div", { class: "notes" }, t.notes || "لا توجد معلومات بعد."),
+        t.desc ? h("p", { class: "muted small" }, "التعليمات: " + t.desc) : null),
+      S.isAdmin && t.assignee !== S.myId ? h("div", { class: "btns" }, armed("rel-" + t.id, "تحرير المهمة", "تحرير؟ اضغط مجدداً", () => release(t))) : null));
+  }
+  const counts = {};
+  for (const t of done) if (t.assignee) counts[t.assignee] = (counts[t.assignee] || 0) + 1;
+  const ranking = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (ranking.length) {
+    const medals = ["🥇", "🥈", "🥉"];
+    out.push(h("div", { class: "sec" }, h("h2", {}, "لوحة الشرف")));
+    out.push(h("div", { class: "card lead" }, ranking.map(([id, n], i) => [
+      h("span", { class: "medal" }, medals[i] || "⭐"),
+      h("div", { class: "row" }, avatar(+id), h("span", {}, nameOf(+id))),
+      h("strong", {}, `${n} ✓`)])));
+  }
+  out.push(h("div", { class: "sec" }, h("h2", {}, `المهام المنجزة (${done.length})`)));
+  if (!done.length) out.push(h("p", { class: "muted small", style: "margin:0 2px" }, "لا توجد مهام منجزة بعد."));
+  for (const t of done) {
+    out.push(h("div", { class: "card" },
+      h("div", { class: "row" }, h("span", {}, "✅"), h("h3", { class: "grow" }, t.title), h("span", { class: "muted small" }, ago(t.doneAt))),
+      h("div", { class: "meta" }, avatar(t.assignee), h("span", {}, "أنجزها " + nameOf(t.assignee))),
+      h("details", {}, h("summary", {}, "عرض قسمه"), h("div", { class: "notes" }, t.notes || "لم تُترك معلومات.")),
+      S.isAdmin ? h("div", { class: "btns" },
+        armed("reo-" + t.id, "إعادة فتح", "إعادة فتح؟", () => reopen(t)),
+        armed("deld-" + t.id, "حذف", "حذف؟", () => remove(t), "danger")) : null));
+  }
+  if (S.isAdmin) out.push(...viewAdmin());
+  return out;
+}
+
+function viewIdeas() {
+  const props = byStatus("proposed").sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const out = [
+    h("div", { class: "card", style: "background:var(--accent-soft);border-color:transparent" },
+      h("h3", {}, "💡 لديك فكرة مهمة؟"),
+      h("p", { class: "small", style: "margin:4px 0 0" }, S.isAdmin ? "بصفتك المسؤول، تذهب مهامك مباشرة إلى المهام المتاحة. اقبل هنا ما يقترحه الفريق." : "اقترحها: يراها كل الفريق، ويقبلها المسؤول لتنضم إلى المهام المتاحة."),
+      h("div", { class: "btns" }, h("button", { class: "btn primary", disabled: !S.canWrite || !S.myId, onclick: () => openTaskForm(S.isAdmin ? "add" : "propose") }, S.isAdmin ? "＋ إضافة مهمة" : "اقتراح مهمة"))),
+    h("div", { class: "sec" }, h("h2", {}, `اقتراحات بانتظار القبول (${props.length})`))];
+  if (!props.length) out.push(h("p", { class: "muted small", style: "margin:0 2px" }, "لا توجد اقتراحات بانتظار القبول."));
+  for (const t of props) {
+    const mine = t.proposedBy && t.proposedBy === S.myId;
+    out.push(h("div", { class: "card" },
+      h("div", { class: "row" }, h("h3", { class: "grow" }, t.title), h("span", { class: "chip warn" }, "بانتظار القبول")),
+      t.desc ? h("p", { class: "desc small" }, t.desc) : null,
+      taskMeta(t),
+      (S.isAdmin || mine) ? h("div", { class: "btns" },
+        S.isAdmin ? h("button", { class: "btn ok sm", onclick: () => approve(t) }, "✓ قبول") : null,
+        h("button", { class: "btn sm", onclick: () => openTaskForm("edit", t) }, "تعديل"),
+        armed("rej-" + t.id, S.isAdmin && !mine ? "رفض" : "سحب الاقتراح", "متأكد؟", () => remove(t, S.isAdmin && !mine ? "تم رفض الاقتراح" : "تم سحب الاقتراح"), "danger")) : null));
+  }
+  return out;
+}
+
+function view() {
+  const st = stats();
+  const tab = currentTab();
+  const cur = myCurrent();
+  const counts = { pool: byStatus("open").length, ideas: byStatus("proposed").length };
+  const header = h("header", { class: "top" },
+    h("div", { class: "brand" }, h("h1", {}, "توزيع المهام"),
+      h("div", { class: "row" }, S.isAdmin ? h("span", { class: "chip" }, "👑 المسؤول") : null,
+        h("button", { class: "icon-btn", "aria-label": "الحساب", title: "الحساب", onclick: openAccount }, avatar(S.myId)))),
+    h("div", { class: "gbar", title: "التقدم العام" }, h("div", { class: "gbar-fill", style: `width:${st.p}%` })),
+    h("div", { class: "gstats" }, h("span", {}, "أُنجزت ", h("b", { style: "direction:ltr;display:inline-block" }, `${st.done}/${st.total}`)), h("span", {}, "التقدم العام ", h("b", {}, P(st.p)))));
+  const tabs = h("nav", { class: "tabs" }, TABS.map(t => h("a", { href: "#" + t.id, class: "tab" + (tab === t.id ? " on" : "") },
+    h("span", { class: "ti" }, t.icon), h("span", {}, t.label),
+    t.id === "my-task" && cur ? h("span", { class: "badge dot" }) : null,
+    counts[t.id] ? h("span", { class: "badge" }, counts[t.id]) : null)));
+  const banners = [];
+  if (S.error) banners.push(h("div", { class: "banner" }, "تعذّر الاتصال بالخادم، سنعيد المحاولة تلقائياً…"));
+  else if (S.stale) banners.push(h("div", { class: "banner" }, "الاتصال المباشر منقطع: قد تكون البيانات متأخرة."));
+  let body;
+  if (!S.loaded) body = [h("div", { class: "skeleton" }), h("div", { class: "skeleton" }), h("div", { class: "skeleton" })];
+  else body = tab === "pool" ? viewPool() : tab === "team" ? viewTeam() : tab === "ideas" ? viewIdeas() : viewMine();
+  return h("div", {}, header, tabs, banners, h("main", {}, body));
+}
+
+/* ---------- render ---------- */
+let rafPending = false;
+function scheduleRender() {
+  if (rafPending) return; rafPending = true;
+  requestAnimationFrame(() => { rafPending = false; render(); });
+}
+function render() {
+  if (S.dragging) { S.renderQueued = true; return; }
+  const app = $("#app");
+  if (S.authed === null) { app.replaceChildren(h("div", { class: "skeleton", style: "margin-top:40px" })); return; }
+  if (S.authed === false) { if (!app.querySelector("#login")) app.replaceChildren(viewLogin()); return; }
+  const ae = document.activeElement;
+  const key = ae && ae.dataset ? ae.dataset.key : null;
+  let sel = null;
+  if (key && ae.tagName === "TEXTAREA") sel = [ae.selectionStart, ae.selectionEnd, ae.scrollTop];
+  app.replaceChildren(view());
+  if (key) {
+    const el = app.querySelector(`[data-key="${CSS.escape(key)}"]`);
+    if (el) { el.focus({ preventScroll: true }); if (sel) { try { el.setSelectionRange(sel[0], sel[1]); el.scrollTop = sel[2]; } catch (e) {} } }
+  }
+  document.querySelectorAll("[data-save]").forEach(el => updateSaveState(el.dataset.save));
+}
+window.addEventListener("hashchange", () => { window.scrollTo(0, 0); render(); });
+setInterval(() => { if (!document.activeElement || document.activeElement === document.body) scheduleRender(); }, 60000);
+
+/* ---------- connexion ---------- */
+function viewLogin() {
+  let mode = "login";
+  const msg = h("p", { class: "small", style: "color:var(--danger);min-height:20px;margin:8px 0 0" });
+  const user = h("input", { type: "text", autocomplete: "username", autocapitalize: "none", dir: "ltr", placeholder: "مثال: ahmad" });
+  const pass = h("input", { type: "password", autocomplete: "current-password", dir: "ltr" });
+  const name = h("input", { type: "text", placeholder: "مثال: أحمد" });
+  const code = h("input", { type: "text", autocapitalize: "none", dir: "ltr" });
+  const extra = h("div", { style: "display:none" }, h("label", { class: "lbl" }, "الاسم الظاهر"), name, h("label", { class: "lbl" }, "رمز الانضمام (من المسؤول)"), code);
+  const submit = h("button", { class: "btn primary block", type: "submit", style: "margin-top:18px" }, "دخول");
+  const sw = h("button", { class: "btn ghost block", type: "button", style: "margin-top:8px" }, "ليس لديك حساب؟ أنشئ حساباً");
+  sw.onclick = () => {
+    mode = mode === "login" ? "register" : "login";
+    extra.style.display = mode === "register" ? "" : "none";
+    submit.textContent = mode === "register" ? "إنشاء الحساب" : "دخول";
+    sw.textContent = mode === "register" ? "لديك حساب؟ سجّل الدخول" : "ليس لديك حساب؟ أنشئ حساباً";
+    pass.autocomplete = mode === "register" ? "new-password" : "current-password";
+    msg.textContent = "";
+  };
+  const form = h("form", { id: "login", class: "card", style: "margin-top:40px", onsubmit: async e => {
+    e.preventDefault(); msg.textContent = ""; submit.disabled = true;
+    try {
+      if (mode === "register") await api("POST", "/api/register", { username: user.value, password: pass.value, displayName: name.value, joinCode: code.value });
+      else await api("POST", "/api/login", { username: user.value, password: pass.value });
+      await refresh(true); connectEvents();
+    } catch (err) { msg.textContent = errMsg(err); }
+    submit.disabled = false;
+  } },
+    h("div", { style: "text-align:center;font-size:44px" }, "🎯"),
+    h("h2", { style: "text-align:center" }, "توزيع المهام"),
+    h("p", { class: "muted small", style: "text-align:center;margin:0" }, "اسحب مهمة، املأ قسمك، وتابع تقدّم الفريق."),
+    h("label", { class: "lbl" }, "اسم المستخدم"), user,
+    h("label", { class: "lbl" }, "كلمة المرور"), pass,
+    extra, msg, submit, sw);
+  return form;
+}
+function openAccount() {
+  const cur = h("input", { type: "password", autocomplete: "current-password", dir: "ltr" });
+  const nw = h("input", { type: "password", autocomplete: "new-password", dir: "ltr" });
+  modal(h("div", {},
+    h("div", { class: "row" }, avatar(S.myId, true), h("div", {}, h("h2", { style: "margin:0" }, S.me.displayName), h("div", { class: "muted small", dir: "ltr" }, "@" + S.me.username))),
+    h("details", {}, h("summary", {}, "تغيير كلمة المرور"),
+      h("label", { class: "lbl" }, "كلمة المرور الحالية"), cur, h("label", { class: "lbl" }, "كلمة المرور الجديدة"), nw,
+      h("div", { class: "btns" }, h("button", { class: "btn primary", onclick: async () => {
+        try { await api("POST", "/api/me/password", { current: cur.value, password: nw.value }); toast("تم تغيير كلمة المرور ✓"); closeModal(); }
+        catch (e) { toast(errMsg(e)); }
+      } }, "حفظ"))),
+    h("div", { class: "btns" },
+      h("button", { class: "btn danger", onclick: async () => { await api("POST", "/api/logout").catch(() => {}); closeModal(); location.reload(); } }, "تسجيل الخروج"),
+      h("button", { class: "btn ghost", onclick: closeModal }, "إغلاق"))));
+}
+
+/* ---------- gestion de l'équipe (admin) ---------- */
+function viewAdmin() {
+  const out = [h("div", { class: "sec" }, h("h2", {}, `إدارة الفريق (${S.userList.length})`))];
+  out.push(h("div", { class: "card", style: "background:var(--accent-soft);border-color:transparent" },
+    h("h3", {}, "🔑 رمز الانضمام"),
+    S.joinCode
+      ? [h("p", { class: "small", style: "margin:4px 0 8px" }, "أرسل هذا الرمز ورابط التطبيق لموظفيك ليُنشئوا حساباتهم:"),
+         h("div", { class: "row" }, h("code", { class: "grow", dir: "ltr", style: "font-size:18px;font-weight:700" }, S.joinCode),
+           h("button", { class: "btn sm", onclick: async () => {
+             try { await navigator.clipboard.writeText(`${location.origin}\nرمز الانضمام: ${S.joinCode}`); toast("تم النسخ ✓"); } catch (e) { toast("انسخ الرمز يدوياً"); }
+           } }, "نسخ"))]
+      : h("p", { class: "small", style: "margin:4px 0 0" }, "التسجيل مغلق: أضف المتغير JOIN_CODE في Railway لفتحه.")));
+  for (const u of S.userList) {
+    const isMe = u.id === S.myId;
+    out.push(h("div", { class: "card" },
+      h("div", { class: "row" }, avatar(u.id, true), h("div", { class: "grow" }, h("strong", {}, nameOf(u.id)), u.is_admin ? h("div", {}, h("span", { class: "chip" }, "👑 مسؤول")) : null)),
+      isMe ? null : h("div", { class: "btns" },
+        h("button", { class: "btn sm", onclick: () => write("u" + u.id, () => api("POST", `/api/users/${u.id}/admin`, { isAdmin: !u.is_admin }), u.is_admin ? "أُزيلت صلاحية المسؤول" : "أصبح مسؤولاً 👑") }, u.is_admin ? "إزالة صلاحية المسؤول" : "جعله مسؤولاً"),
+        h("button", { class: "btn sm", onclick: () => resetPassword(u) }, "كلمة مرور جديدة"),
+        armed("delu-" + u.id, "حذف الحساب", "حذف؟ اضغط مجدداً", () => write("u" + u.id, () => api("DELETE", `/api/users/${u.id}`), "حُذف الحساب"), "danger"))));
+  }
+  return out;
+}
+function resetPassword(u) {
+  const pw = h("input", { type: "text", dir: "ltr", value: Math.random().toString(36).slice(2, 10) });
+  modal(h("div", {}, h("h2", {}, "كلمة مرور جديدة لـ " + nameOf(u.id)),
+    h("p", { class: "muted small", style: "margin:0" }, "أرسلها له، ويمكنه تغييرها من حسابه."), h("label", { class: "lbl" }, "كلمة المرور"), pw,
+    h("div", { class: "btns" },
+      h("button", { class: "btn primary", onclick: async () => { if (await write("u" + u.id, () => api("POST", `/api/users/${u.id}/password`, { password: pw.value }), "تم التغيير ✓")) closeModal(); } }, "حفظ"),
+      h("button", { class: "btn ghost", onclick: closeModal }, "إلغاء"))));
+}
+
+/* ---------- synchronisation ---------- */
+let refreshing = null, refreshAgain = false;
+async function refresh(force) {
+  if (refreshing) { refreshAgain = true; return refreshing; }
+  refreshing = (async () => {
+    try {
+      const d = await api("GET", "/api/state");
+      S.authed = true; S.error = null;
+      S.me = d.me; S.myId = d.me.id; S.isAdmin = d.me.isAdmin; S.joinCode = d.joinCode || "";
+      S.userList = d.users; S.users = Object.fromEntries(d.users.map(u => [u.id, u]));
+      S.tasks = d.tasks.map(t => ({ id: t.id, title: t.title, desc: t.descr, status: t.status, proposedBy: t.proposed_by, assignee: t.assignee,
+        progress: t.progress, notes: t.notes, createdAt: t.created_at, takenAt: t.taken_at, doneAt: t.done_at }));
+      S.loaded = true;
+    } catch (e) {
+      if (e.status === 401) S.authed = false; else S.error = e.code || "error";
+    }
+    scheduleRender();
+  })();
+  await refreshing; refreshing = null;
+  if (refreshAgain) { refreshAgain = false; return refresh(); }
+}
+let es = null, debounce;
+function connectEvents() {
+  if (es || !window.EventSource) return;
+  es = new EventSource("/api/events");
+  es.addEventListener("changed", () => { clearTimeout(debounce); debounce = setTimeout(refresh, 150); });
+  es.onopen = () => { if (S.stale) { S.stale = false; refresh(); } };
+  es.onerror = () => { S.stale = true; scheduleRender(); if (es.readyState === 2) { es = null; setTimeout(() => { if (S.authed) connectEvents(); }, 5000); } };
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.authed) refresh(); });
+setInterval(() => { if (S.authed && S.error) refresh(); }, 15000);
+
+/* ---------- boot ---------- */
+render();
+refresh(true).then(() => { if (S.authed) connectEvents(); });
+})();
+</script>
+</body>
+</html>
