@@ -120,6 +120,29 @@ details[open] summary::before{content:"▾ ";}
 .info textarea{background:var(--card);min-height:140px}
 .more{appearance:none;border:none;background:none;color:var(--accent);font:inherit;font-weight:700;font-size:14px;padding:4px 0;cursor:pointer}
 .info-empty{display:block;width:100%;margin:4px 0 6px;text-align:center;border:2px dashed var(--line);box-shadow:none;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}
+.polls-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 2px 6px}
+.polls-head h2{font-size:16px;margin:0}
+.poll{padding:14px}
+.poll h3{margin:0;font-size:16px;overflow-wrap:anywhere}
+.opt{position:relative;display:flex;align-items:center;gap:8px;width:100%;min-height:44px;margin-top:6px;padding:6px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);overflow:hidden;cursor:pointer;text-align:start;font:inherit;color:inherit}
+.opt[disabled]{cursor:default}
+.opt .fillb{position:absolute;inset-block:0;inset-inline-start:0;background:var(--accent-soft);transition:width .4s;z-index:0}
+.opt.mine{border-color:var(--accent);border-width:2px}
+.opt.mine .fillb{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.opt.win .lab{font-weight:800}
+.opt>*:not(.fillb){position:relative;z-index:1}
+.opt .lab{flex:1;min-width:0;overflow-wrap:anywhere}
+.opt .cnt{font-weight:800;font-size:15px;display:inline-flex;align-items:baseline;gap:6px;flex:none}
+.opt .cnt small{font-size:12px;font-weight:600;color:var(--muted)}
+.voters{display:flex;flex:none}
+.voters .av{width:20px;height:20px;font-size:10px;box-shadow:0 0 0 2px var(--card)}
+.voters .av+.av{margin-inline-start:-5px}
+.optrow{display:flex;align-items:center;gap:2px}
+.btn.x{min-height:32px;padding:2px 8px;border-color:transparent;color:var(--muted);font-weight:600}
+.btn.x.armed{color:#fff}
+.sub-add input[type=text]{min-width:0}
+.optrow .opt{flex:1}
+.poll-form .optin{margin-top:8px}
 .subw{border-radius:12px;background:var(--bg)}
 .subw.open{outline:1px solid var(--line)}
 .sub{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:15px}
@@ -196,7 +219,7 @@ function confetti() {
 /* ---------- state ---------- */
 const S = {
   me: null, myId: null, isAdmin: false, canWrite: true, joinCode: "",
-  tasks: [], users: {}, userList: [], stepsBy: {}, loaded: false, stale: false, error: null, authed: null,
+  tasks: [], users: {}, userList: [], stepsBy: {}, polls: [], pollDraft: {}, showClosedPolls: false, loaded: false, stale: false, error: null, authed: null,
   drafts: {}, saving: {}, subDraft: {}, openSplit: {}, openSub: {}, armed: null, dragging: false, renderQueued: false,
 };
 const ERR = {
@@ -207,6 +230,8 @@ const ERR = {
   already_taken: "تأخرت، لقد أُخذت للتو!", has_current_task: "أنهِ مهمتك الحالية أولاً 😉",
   not_allowed: "لا يمكن تنفيذ هذا الإجراء (ربما تغيّرت المهمة).", admin_only: "هذا الإجراء للمسؤول فقط.",
   title_required: "أعطِ المهمة عنواناً", cannot_delete_self: "لا يمكنك حذف حسابك.", cannot_change_self: "لا يمكنك تغيير صلاحياتك.",
+  question_required: "اكتب سؤال التصويت.", option_required: "اكتب الخيار.", option_exists: "هذا الخيار موجود من قبل.",
+  poll_closed: "هذا التصويت مغلق.", too_many_options: "عدد الخيارات كبير جداً (20 كحد أقصى).",
   subtasks_pending: "لم تكتمل كل المهام الفرعية بعد.", no_nested: "المهمة الفرعية لا يمكن تقسيمها إلى مهام للفريق، أضف خطوات بدلاً من ذلك.",
 };
 async function api(method, url, body) {
@@ -690,7 +715,7 @@ function view() {
     h("span", { class: "ti" }, t.icon), h("span", {}, t.label),
     t.id === "my-task" && cur ? h("span", { class: "badge dot" }) : null,
     counts[t.id] ? h("span", { class: "badge" }, counts[t.id]) : null)));
-  const info = S.loaded ? infoBox() : null;
+  const info = S.loaded ? [infoBox(), pollsBox()] : null;
   const banners = [];
   if (S.error) banners.push(h("div", { class: "banner" }, "تعذّر الاتصال بالخادم، سنعيد المحاولة تلقائياً…"));
   else if (S.stale) banners.push(h("div", { class: "banner" }, "الاتصال المباشر منقطع: قد تكون البيانات متأخرة."));
@@ -722,6 +747,97 @@ async function saveInfo(btn) {
   if (ok) { S.projectInfo = Object.assign({}, S.projectInfo, { text: S.infoDraft.trim() }); S.infoEdit = false; render(); }
   else btn.disabled = false;
 }
+/* ---------- sondages : chacun peut en créer, ajouter des choix et voter ---------- */
+function pollsBox() {
+  const open = S.polls.filter(p => !p.closed), closed = S.polls.filter(p => p.closed);
+  const out = [h("div", { class: "polls-head" },
+    h("h2", {}, "📊 تصويت" + (open.length ? ` (${open.length})` : "")),
+    h("button", { class: "btn sm", onclick: openPollForm }, "＋ تصويت جديد"))];
+  if (!open.length) out.push(h("p", { class: "hint", style: "margin:0 2px 6px" }, "لا يوجد تصويت مفتوح. اطرح سؤالاً على الفريق!"));
+  for (const p of open) out.push(pollCard(p));
+  if (closed.length) {
+    out.push(h("button", { class: "more", style: "margin:0 2px 6px", onclick: () => { S.showClosedPolls = !S.showClosedPolls; render(); } },
+      (S.showClosedPolls ? "▴ إخفاء" : "▾ عرض") + ` التصويتات المغلقة (${closed.length})`));
+    if (S.showClosedPolls) for (const p of closed) out.push(pollCard(p));
+  }
+  return h("section", { "aria-label": "تصويت" }, out);
+}
+function pollCard(p) {
+  const total = p.votes.length;
+  const mine = (p.votes.find(v => v.userId === S.myId) || {}).optionId;
+  const counts = {};
+  for (const v of p.votes) counts[v.optionId] = (counts[v.optionId] || 0) + 1;
+  const max = Math.max(0, ...Object.values(counts));
+  const manage = S.isAdmin || p.createdBy === S.myId;
+  const opts = p.options.map(o => {
+    const n = counts[o.id] || 0, share = total ? Math.round(n * 100 / total) : 0;
+    const voters = p.votes.filter(v => v.optionId === o.id).map(v => v.userId);
+    const canDel = !p.closed && (manage || o.addedBy === S.myId);
+    return h("div", { class: "optrow" },
+      h("button", { class: "opt" + (o.id === mine ? " mine" : "") + (p.closed && n && n === max ? " win" : ""), disabled: p.closed,
+          title: voters.map(nameOf).join("، "), onclick: () => vote(p, o.id === mine ? null : o.id) },
+        h("span", { class: "fillb", style: `width:${share}%` }),
+        h("span", { class: "lab" }, (o.id === mine ? "✓ " : "") + o.label),
+        h("span", { class: "voters" }, voters.slice(0, 5).map(id => avatar(id))),
+        h("span", { class: "cnt" }, String(n), total ? h("small", {}, P(share)) : null)),
+      canDel ? armed("delo-" + o.id, "✕", "حذف؟", () => write("o" + o.id, () => api("DELETE", `/api/poll-options/${o.id}`), "حُذف الخيار"), "ghost x") : null);
+  });
+  const key = "poll-" + p.id;
+  const add = p.closed ? null : h("div", { class: "sub-add" },
+    h("input", { type: "text", maxlength: "100", "data-key": key, placeholder: "أضف خياراً…", value: S.pollDraft[p.id] || "",
+      oninput: e => { S.pollDraft[p.id] = e.target.value; },
+      onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); addOption(p); } } }),
+    h("button", { class: "btn sm", onclick: () => addOption(p) }, "＋ خيار"));
+  return h("div", { class: "card poll" },
+    h("div", { class: "row", style: "align-items:flex-start" },
+      h("div", { class: "grow" }, h("h3", {}, p.question),
+        h("div", { class: "meta", style: "margin-top:2px" }, avatar(p.createdBy), h("span", {}, nameOf(p.createdBy) + " · " + ago(p.createdAt)),
+          p.closed ? h("span", { class: "chip warn" }, "مغلق") : null)),
+      manage ? h("div", { class: "row", style: "gap:4px" },
+        h("button", { class: "btn sm ghost", onclick: () => write("p" + p.id, () => api("POST", `/api/polls/${p.id}/close`, { closed: !p.closed }), p.closed ? "أُعيد فتح التصويت" : "أُغلق التصويت 🔒") }, p.closed ? "إعادة فتح" : "🔒 إغلاق"),
+        armed("delp-" + p.id, "حذف", "حذف؟", () => write("p" + p.id, () => api("DELETE", `/api/polls/${p.id}`), "حُذف التصويت"), "danger")) : null),
+    p.options.length ? opts : h("p", { class: "hint" }, "لا توجد خيارات بعد، أضف أول خيار."),
+    add,
+    h("div", { class: "muted small", style: "margin-top:8px" },
+      `صوّت ${total} من ${S.userList.length}` + (!p.closed && mine ? " · اضغط على خيارك لإلغاء صوتك" : !p.closed && p.options.length ? " · اضغط على خيار للتصويت" : "")));
+}
+async function vote(p, optionId) {
+  const prev = p.votes;
+  p.votes = p.votes.filter(v => v.userId !== S.myId).concat(optionId ? [{ userId: S.myId, optionId }] : []);
+  render();
+  const ok = await write("p" + p.id, () => api("POST", `/api/polls/${p.id}/vote`, { optionId }), optionId ? "تم التصويت ✓" : "أُلغي صوتك");
+  if (!ok) { p.votes = prev; render(); }
+}
+async function addOption(p) {
+  const label = (S.pollDraft[p.id] || "").trim();
+  if (!label) return toast("اكتب الخيار.");
+  const ok = await write("p" + p.id, () => api("POST", `/api/polls/${p.id}/options`, { label }), "أُضيف الخيار ✓");
+  if (ok) { S.pollDraft[p.id] = ""; render(); const el = document.querySelector(`[data-key="poll-${p.id}"]`); if (el) el.focus({ preventScroll: true }); }
+}
+function openPollForm() {
+  const q = h("input", { type: "text", maxlength: "200", placeholder: "مثال: متى نعقد اجتماع الأسبوع القادم؟" });
+  const list = h("div", {});
+  const addField = v => list.append(h("input", { type: "text", class: "optin", maxlength: "100", placeholder: "خيار " + (list.children.length + 1), value: v || "" }));
+  addField(); addField();
+  const submit = h("button", { class: "btn primary block", type: "submit" }, "نشر التصويت");
+  modal(h("form", { class: "poll-form", onsubmit: async e => {
+    e.preventDefault();
+    const question = q.value.trim();
+    if (!question) { q.focus(); return toast("اكتب سؤال التصويت."); }
+    const options = [...list.querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean);
+    submit.disabled = true;
+    const ok = await write("newpoll", () => api("POST", "/api/polls", { question, options }), "نُشر التصويت 📊");
+    if (ok) closeModal(); else submit.disabled = false;
+  } },
+    h("h2", {}, "تصويت جديد"),
+    h("p", { class: "muted small", style: "margin:0" }, "يمكن لكل الفريق التصويت وإضافة خيارات أخرى."),
+    h("label", { class: "lbl" }, "السؤال"), q,
+    h("label", { class: "lbl" }, "الخيارات"), list,
+    h("button", { class: "btn sm ghost", type: "button", style: "margin-top:8px", onclick: () => { if (list.children.length < 20) { addField(); list.lastChild.focus(); } } }, "＋ خيار آخر"),
+    h("div", { class: "btns" }, submit, h("button", { class: "btn ghost block", type: "button", onclick: closeModal }, "إلغاء"))));
+  q.focus();
+}
+
 function infoBox() {
   const pi = S.projectInfo || { text: "" };
   if (S.infoEdit && S.isAdmin) {
@@ -869,6 +985,9 @@ async function refresh(force) {
         progress: t.progress, notes: t.notes, createdAt: t.created_at, takenAt: t.taken_at, doneAt: t.done_at,
         parentId: t.parent_id, isGroup: !!t.is_group }));
       S.projectInfo = d.projectInfo || { text: "" };
+      S.polls = (d.polls || []).map(p => ({ id: p.id, question: p.question, createdBy: p.created_by, closed: p.closed, createdAt: p.created_at,
+        options: (d.pollOptions || []).filter(o => o.poll_id === p.id).map(o => ({ id: o.id, label: o.label, addedBy: o.added_by })),
+        votes: (d.pollVotes || []).filter(v => v.poll_id === p.id).map(v => ({ userId: v.user_id, optionId: v.option_id })) }));
       S.stepsBy = {};
       for (const s of d.steps || []) (S.stepsBy[s.task_id] = S.stepsBy[s.task_id] || []).push(s);
       S.loaded = true;

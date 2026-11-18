@@ -68,6 +68,28 @@ async function migrate() {
       updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- sondages : chacun peut en créer, ajouter des choix et voter (une voix par sondage)
+    CREATE TABLE IF NOT EXISTS polls (
+      id SERIAL PRIMARY KEY,
+      question TEXT NOT NULL,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      closed BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS poll_options (
+      id SERIAL PRIMARY KEY,
+      poll_id INTEGER NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      added_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS poll_options_unique ON poll_options(poll_id, lower(label));
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      poll_id INTEGER NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      option_id INTEGER NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+      PRIMARY KEY (poll_id, user_id)
+    );
     -- une seule tâche en cours par personne, garanti par la base
     -- (une tâche mère qu'on coordonne ne compte pas : on peut piocher une tâche en plus)
     DROP INDEX IF EXISTS one_taken_task_per_user;
@@ -200,7 +222,7 @@ app.post("/api/logout", (req, res) => {
 });
 
 app.get("/api/state", auth, wrap(async (req, res) => {
-  const [users, tasks, steps, info] = await Promise.all([
+  const [users, tasks, steps, info, polls, options, votes] = await Promise.all([
     pool.query("SELECT id, display_name, is_admin FROM users ORDER BY display_name"),
     pool.query(`SELECT id, title, descr, status, proposed_by, assignee, progress, notes, parent_id, is_group,
       (extract(epoch from created_at)*1000)::bigint AS created_at,
@@ -210,6 +232,9 @@ app.get("/api/state", auth, wrap(async (req, res) => {
     pool.query("SELECT id, task_id, title, done, notes FROM steps ORDER BY id"),
     pool.query(`SELECT s.value, s.updated_by, (extract(epoch from s.updated_at)*1000)::bigint AS updated_at
       FROM settings s WHERE s.key='project_info'`),
+    pool.query("SELECT id, question, created_by, closed, (extract(epoch from created_at)*1000)::bigint AS created_at FROM polls ORDER BY id DESC"),
+    pool.query("SELECT id, poll_id, label, added_by FROM poll_options ORDER BY id"),
+    pool.query("SELECT poll_id, user_id, option_id FROM poll_votes"),
   ]);
   const pi = info.rows[0];
   res.json({
@@ -219,7 +244,84 @@ app.get("/api/state", auth, wrap(async (req, res) => {
     tasks: tasks.rows.map(t => ({ ...t, created_at: +t.created_at || null, taken_at: +t.taken_at || null, done_at: +t.done_at || null })),
     steps: steps.rows,
     projectInfo: pi ? { text: pi.value, updatedBy: pi.updated_by, updatedAt: +pi.updated_at || null } : { text: "" },
+    polls: polls.rows.map(p => ({ ...p, created_at: +p.created_at || null })),
+    pollOptions: options.rows,
+    pollVotes: votes.rows,
   });
+}));
+
+/* ---------- sondages ---------- */
+const MAX_OPTIONS = 20;
+async function getPoll(id) {
+  const { rows } = await pool.query("SELECT * FROM polls WHERE id=$1", [+id || 0]);
+  return rows[0] || null;
+}
+const canManagePoll = (p, u) => p && (u.is_admin || p.created_by === u.id);
+
+app.post("/api/polls", auth, wrap(async (req, res) => {
+  const question = str(req.body.question, 200);
+  if (!question) return res.status(400).json({ error: "question_required" });
+  const seen = new Set();
+  const opts = (Array.isArray(req.body.options) ? req.body.options : [])
+    .map(o => str(o, 100)).filter(o => o && !seen.has(o.toLowerCase()) && seen.add(o.toLowerCase())).slice(0, MAX_OPTIONS);
+  await tx(async c => {
+    const { rows } = await c.query("INSERT INTO polls (question, created_by) VALUES ($1,$2) RETURNING id", [question, req.user.id]);
+    for (const o of opts) await c.query("INSERT INTO poll_options (poll_id, label, added_by) VALUES ($1,$2,$3)", [rows[0].id, o, req.user.id]);
+  });
+  broadcast(); res.json({ ok: true });
+}));
+
+// ajouter un choix : tout le monde, tant que le sondage est ouvert
+app.post("/api/polls/:id/options", auth, wrap(async (req, res) => {
+  const label = str(req.body.label, 100);
+  if (!label) return res.status(400).json({ error: "option_required" });
+  const p = await getPoll(req.params.id);
+  if (!p || p.closed) return res.status(409).json({ error: "poll_closed" });
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM poll_options WHERE poll_id=$1", [p.id]);
+  if (rows[0].n >= MAX_OPTIONS) return res.status(409).json({ error: "too_many_options" });
+  try {
+    await pool.query("INSERT INTO poll_options (poll_id, label, added_by) VALUES ($1,$2,$3)", [p.id, label, req.user.id]);
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "option_exists" });
+    throw e;
+  }
+  broadcast(); res.json({ ok: true });
+}));
+
+// voter (une voix par personne, modifiable) ; optionId null = retirer sa voix
+app.post("/api/polls/:id/vote", auth, wrap(async (req, res) => {
+  const p = await getPoll(req.params.id);
+  if (!p || p.closed) return res.status(409).json({ error: "poll_closed" });
+  const optionId = req.body.optionId == null ? null : +req.body.optionId || 0;
+  if (optionId === null) {
+    await pool.query("DELETE FROM poll_votes WHERE poll_id=$1 AND user_id=$2", [p.id, req.user.id]);
+  } else {
+    const r = await pool.query(`INSERT INTO poll_votes (poll_id, user_id, option_id)
+      SELECT $1, $2, id FROM poll_options WHERE id=$3 AND poll_id=$1
+      ON CONFLICT (poll_id, user_id) DO UPDATE SET option_id=EXCLUDED.option_id`, [p.id, req.user.id, optionId]);
+    if (!r.rowCount) return res.status(409).json({ error: "not_allowed" });
+  }
+  broadcast(); res.json({ ok: true });
+}));
+
+// fermer / rouvrir, supprimer : l'auteur du sondage ou l'admin
+app.post("/api/polls/:id/close", auth, wrap(async (req, res) => {
+  const p = await getPoll(req.params.id);
+  if (!canManagePoll(p, req.user)) return res.status(403).json({ error: "not_allowed" });
+  await pool.query("UPDATE polls SET closed=$1 WHERE id=$2", [!!req.body.closed, p.id]);
+  broadcast(); res.json({ ok: true });
+}));
+app.delete("/api/polls/:id", auth, wrap(async (req, res) => {
+  const p = await getPoll(req.params.id);
+  if (!canManagePoll(p, req.user)) return res.status(403).json({ error: "not_allowed" });
+  await pool.query("DELETE FROM polls WHERE id=$1", [p.id]);
+  broadcast(); res.json({ ok: true });
+}));
+// retirer un choix : la personne qui l'a ajouté (tant que le sondage est ouvert), l'auteur du sondage ou l'admin
+app.delete("/api/poll-options/:id", auth, wrap(async (req, res) => {
+  const r = await pool.query(`DELETE FROM poll_options o USING polls p WHERE o.id=$1 AND p.id=o.poll_id
+    AND ($2 OR p.created_by=$3 OR (o.added_by=$3 AND NOT p.closed))`, [+req.params.id || 0, req.user.is_admin, req.user.id]);
+  done(res, r.rowCount);
 }));
 
 // informations sur le projet (encadré en haut) : modifiables par l'admin, visibles par tous
