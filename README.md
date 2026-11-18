@@ -5,6 +5,7 @@ Application web (Node.js + PostgreSQL) pour répartir les tâches d'une équipe.
 - Chaque salarié pioche **une tâche à la fois**, règle son avancement et remplit « قسمي » (sa partie), visible par toute l'équipe.
 - **Découper une tâche** (« 🧩 المهام الفرعية ») : la personne qui a la tâche, ou l'admin, ajoute des sous-tâches. Chacune est soit une **étape** gardée pour soi (à cocher), soit une **sous-tâche pour l'équipe**, envoyée dans la pioche. L'avancement se calcule alors tout seul. Chaque sous-tâche a son propre texte (on l'ouvre en touchant son titre) : le texte de l'étape, ou les consignes d'une sous-tâche partagée avec, en dessous, ce qu'a écrit le collègue qui l'a prise. Une tâche partagée passe dans « مهام أنسّقها » : son responsable peut piocher une autre tâche en attendant, et il ne peut la terminer que quand toutes ses sous-tâches sont finies.
 - Les salariés **proposent** des tâches, et l'admin les valide. Les tâches ajoutées par l'admin vont directement dans la pioche.
+- Encadré **« 📌 عن المشروع »** en haut de la page : l'admin y écrit les informations du projet (objectif, dates, règles, liens cliquables), visibles par toute l'équipe.
 - Barre d'avancement globale, tableau d'honneur, synchronisation en temps réel.
 - L'admin gère l'équipe : rôle admin, nouveau mot de passe, suppression de compte.
 

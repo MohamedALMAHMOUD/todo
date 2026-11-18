@@ -61,6 +61,13 @@ async function migrate() {
     );
     CREATE INDEX IF NOT EXISTS steps_task_idx ON steps(task_id);
     ALTER TABLE steps ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+    -- réglages partagés (ex. informations sur le projet affichées en haut)
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     -- une seule tâche en cours par personne, garanti par la base
     -- (une tâche mère qu'on coordonne ne compte pas : on peut piocher une tâche en plus)
     DROP INDEX IF EXISTS one_taken_task_per_user;
@@ -193,7 +200,7 @@ app.post("/api/logout", (req, res) => {
 });
 
 app.get("/api/state", auth, wrap(async (req, res) => {
-  const [users, tasks, steps] = await Promise.all([
+  const [users, tasks, steps, info] = await Promise.all([
     pool.query("SELECT id, display_name, is_admin FROM users ORDER BY display_name"),
     pool.query(`SELECT id, title, descr, status, proposed_by, assignee, progress, notes, parent_id, is_group,
       (extract(epoch from created_at)*1000)::bigint AS created_at,
@@ -201,14 +208,26 @@ app.get("/api/state", auth, wrap(async (req, res) => {
       (extract(epoch from done_at)*1000)::bigint AS done_at
       FROM tasks ORDER BY id`),
     pool.query("SELECT id, task_id, title, done, notes FROM steps ORDER BY id"),
+    pool.query(`SELECT s.value, s.updated_by, (extract(epoch from s.updated_at)*1000)::bigint AS updated_at
+      FROM settings s WHERE s.key='project_info'`),
   ]);
+  const pi = info.rows[0];
   res.json({
     me: { id: req.user.id, displayName: req.user.display_name, username: req.user.username, isAdmin: req.user.is_admin },
     joinCode: req.user.is_admin ? JOIN_CODE : undefined,
     users: users.rows,
     tasks: tasks.rows.map(t => ({ ...t, created_at: +t.created_at || null, taken_at: +t.taken_at || null, done_at: +t.done_at || null })),
     steps: steps.rows,
+    projectInfo: pi ? { text: pi.value, updatedBy: pi.updated_by, updatedAt: +pi.updated_at || null } : { text: "" },
   });
+}));
+
+// informations sur le projet (encadré en haut) : modifiables par l'admin, visibles par tous
+app.post("/api/project-info", auth, adminOnly, wrap(async (req, res) => {
+  await pool.query(`INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('project_info', $1, $2, now())
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_by=EXCLUDED.updated_by, updated_at=now()`,
+    [String(req.body.text || "").slice(0, 10000), req.user.id]);
+  broadcast(); res.json({ ok: true });
 }));
 
 app.get("/api/events", auth, (req, res) => {

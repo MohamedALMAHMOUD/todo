@@ -112,6 +112,14 @@ details[open] summary::before{content:"▾ ";}
 .skeleton{height:90px;border-radius:var(--radius);background:linear-gradient(90deg,var(--card),var(--line),var(--card));background-size:200% 100%;animation:sh 1.2s infinite;margin-bottom:12px}
 @keyframes sh{to{background-position:-200% 0}}
 .subs{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.card.info{background:var(--accent-soft);border-color:transparent;margin:4px 0 6px}
+.info h3{margin:0}
+.info-text{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:6px;font-size:15px}
+.info-text.clamp{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.info a{color:var(--accent);font-weight:700}
+.info textarea{background:var(--card);min-height:140px}
+.more{appearance:none;border:none;background:none;color:var(--accent);font:inherit;font-weight:700;font-size:14px;padding:4px 0;cursor:pointer}
+.info-empty{display:block;width:100%;margin:4px 0 6px;text-align:center;border:2px dashed var(--line);box-shadow:none;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}
 .subw{border-radius:12px;background:var(--bg)}
 .subw.open{outline:1px solid var(--line)}
 .sub{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:15px}
@@ -682,13 +690,60 @@ function view() {
     h("span", { class: "ti" }, t.icon), h("span", {}, t.label),
     t.id === "my-task" && cur ? h("span", { class: "badge dot" }) : null,
     counts[t.id] ? h("span", { class: "badge" }, counts[t.id]) : null)));
+  const info = S.loaded ? infoBox() : null;
   const banners = [];
   if (S.error) banners.push(h("div", { class: "banner" }, "تعذّر الاتصال بالخادم، سنعيد المحاولة تلقائياً…"));
   else if (S.stale) banners.push(h("div", { class: "banner" }, "الاتصال المباشر منقطع: قد تكون البيانات متأخرة."));
   let body;
   if (!S.loaded) body = [h("div", { class: "skeleton" }), h("div", { class: "skeleton" }), h("div", { class: "skeleton" })];
   else body = tab === "pool" ? viewPool() : tab === "team" ? viewTeam() : tab === "ideas" ? viewIdeas() : viewMine();
-  return h("div", {}, header, tabs, banners, h("main", {}, body));
+  return h("div", {}, header, info, tabs, banners, h("main", {}, body));
+}
+
+/* ---------- encadré « عن المشروع » (écrit par l'admin, lu par tous) ---------- */
+function linkify(text) {
+  const out = [], re = /https?:\/\/[^\s<>"]+/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    const url = m[0].replace(/[.,;:!?)\]»،]+$/, "");
+    out.push(text.slice(last, m.index), h("a", { href: url, target: "_blank", rel: "noopener noreferrer", dir: "ltr" }, url));
+    last = m.index + url.length; re.lastIndex = last;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+function startInfoEdit() {
+  S.infoEdit = true; S.infoDraft = (S.projectInfo && S.projectInfo.text) || ""; render();
+  setTimeout(() => { const el = document.querySelector('[data-key="info"]'); if (el) el.focus(); }, 30);
+}
+async function saveInfo(btn) {
+  btn.disabled = true;
+  const ok = await write("info", () => api("POST", "/api/project-info", { text: S.infoDraft.trim() }), "حُفظت معلومات المشروع ✓");
+  if (ok) { S.projectInfo = Object.assign({}, S.projectInfo, { text: S.infoDraft.trim() }); S.infoEdit = false; render(); }
+  else btn.disabled = false;
+}
+function infoBox() {
+  const pi = S.projectInfo || { text: "" };
+  if (S.infoEdit && S.isAdmin) {
+    return h("div", { class: "card info" },
+      h("h3", {}, "📌 عن المشروع"),
+      h("p", { class: "hint", style: "margin:0 0 8px" }, "يراها كل الفريق في أعلى الصفحة: الهدف، المواعيد، القواعد، الروابط المهمة…"),
+      h("textarea", { "data-key": "info", maxlength: "10000", value: S.infoDraft, placeholder: "مثال: هدفنا هذا الشهر تجهيز المعرض قبل 15 ديسمبر.\nالملفات المشتركة: https://…",
+        oninput: e => { S.infoDraft = e.target.value; } }),
+      h("div", { class: "btns" },
+        h("button", { class: "btn primary", onclick: e => saveInfo(e.currentTarget) }, "حفظ"),
+        h("button", { class: "btn ghost", onclick: () => { S.infoEdit = false; render(); } }, "إلغاء")));
+  }
+  if (!pi.text) {
+    return S.isAdmin ? h("button", { class: "card info-empty", onclick: startInfoEdit }, "📌 أضف معلومات عن المشروع يراها كل الفريق") : null;
+  }
+  const long = pi.text.length > 280 || pi.text.split("\n").length > 5;
+  return h("div", { class: "card info" },
+    h("div", { class: "row" }, h("h3", { class: "grow" }, "📌 عن المشروع"),
+      S.isAdmin ? h("button", { class: "btn sm ghost", onclick: startInfoEdit }, "✏️ تعديل") : null),
+    h("div", { class: "info-text" + (long && !S.infoOpen ? " clamp" : "") }, linkify(pi.text)),
+    long ? h("button", { class: "more", onclick: () => { S.infoOpen = !S.infoOpen; render(); } }, S.infoOpen ? "عرض أقل ▴" : "عرض المزيد ▾") : null,
+    pi.updatedAt ? h("div", { class: "muted small", style: "margin-top:6px" }, "آخر تحديث " + ago(pi.updatedAt) + (pi.updatedBy ? " · " + nameOf(pi.updatedBy) : "")) : null);
 }
 
 /* ---------- render ---------- */
@@ -813,6 +868,7 @@ async function refresh(force) {
       S.tasks = d.tasks.map(t => ({ id: t.id, title: t.title, desc: t.descr, status: t.status, proposedBy: t.proposed_by, assignee: t.assignee,
         progress: t.progress, notes: t.notes, createdAt: t.created_at, takenAt: t.taken_at, doneAt: t.done_at,
         parentId: t.parent_id, isGroup: !!t.is_group }));
+      S.projectInfo = d.projectInfo || { text: "" };
       S.stepsBy = {};
       for (const s of d.steps || []) (S.stepsBy[s.task_id] = S.stepsBy[s.task_id] || []).push(s);
       S.loaded = true;
