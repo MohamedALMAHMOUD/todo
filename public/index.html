@@ -111,6 +111,20 @@ details[open] summary::before{content:"▾ ";}
 @keyframes fall{to{transform:translateY(105vh) rotate(540deg);opacity:.7}}
 .skeleton{height:90px;border-radius:var(--radius);background:linear-gradient(90deg,var(--card),var(--line),var(--card));background-size:200% 100%;animation:sh 1.2s infinite;margin-bottom:12px}
 @keyframes sh{to{background-position:-200% 0}}
+.subs{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.sub{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:var(--bg);font-size:15px}
+.sub .t{flex:1;min-width:0;overflow-wrap:anywhere}
+.sub.done .t{text-decoration:line-through;color:var(--muted)}
+.sub .who{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex:none}
+.chk{appearance:none;width:28px;height:28px;border-radius:8px;border:2px solid var(--line);background:var(--card);cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#fff;padding:0}
+.chk.on{background:var(--ok);border-color:var(--ok)}
+.chk[disabled]{cursor:default;opacity:.7}
+.mini{width:54px;height:6px}
+.sub-add{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.sub-add input[type=text]{flex:1 1 180px;width:auto;padding:9px 12px}
+.crumb{display:inline-block;font-size:12px;font-weight:700;color:var(--accent);margin-bottom:2px}
+.hint{font-size:13px;color:var(--muted);margin:2px 0 0}
+.auto{font-size:12px;color:var(--muted);font-weight:600}
 </style>
 </head>
 <body>
@@ -166,8 +180,8 @@ function confetti() {
 /* ---------- state ---------- */
 const S = {
   me: null, myId: null, isAdmin: false, canWrite: true, joinCode: "",
-  tasks: [], users: {}, userList: [], loaded: false, stale: false, error: null, authed: null,
-  drafts: {}, saving: {}, armed: null, dragging: false, renderQueued: false,
+  tasks: [], users: {}, userList: [], stepsBy: {}, loaded: false, stale: false, error: null, authed: null,
+  drafts: {}, saving: {}, subDraft: {}, openSplit: {}, armed: null, dragging: false, renderQueued: false,
 };
 const ERR = {
   not_logged_in: "انتهت الجلسة، سجّل الدخول من جديد.", bad_credentials: "اسم المستخدم أو كلمة المرور غير صحيحة.",
@@ -177,6 +191,7 @@ const ERR = {
   already_taken: "تأخرت، لقد أُخذت للتو!", has_current_task: "أنهِ مهمتك الحالية أولاً 😉",
   not_allowed: "لا يمكن تنفيذ هذا الإجراء (ربما تغيّرت المهمة).", admin_only: "هذا الإجراء للمسؤول فقط.",
   title_required: "أعطِ المهمة عنواناً", cannot_delete_self: "لا يمكنك حذف حسابك.", cannot_change_self: "لا يمكنك تغيير صلاحياتك.",
+  subtasks_pending: "لم تكتمل كل المهام الفرعية بعد.", no_nested: "المهمة الفرعية لا يمكن تقسيمها إلى مهام للفريق، أضف خطوات بدلاً من ذلك.",
 };
 async function api(method, url, body) {
   const opt = { method, credentials: "same-origin", headers: {} };
@@ -200,8 +215,22 @@ const TABS = [
 ];
 const currentTab = () => (TABS.find(t => "#" + t.id === location.hash) || TABS[0]).id;
 const byStatus = s => S.tasks.filter(t => t.status === s);
-const myCurrent = () => S.myId ? S.tasks.find(t => t.status === "taken" && t.assignee === S.myId) : null;
-const pct = t => t.status === "done" ? 100 : Math.max(0, Math.min(100, Math.round(+t.progress || 0)));
+// une tâche mère qu'on coordonne (isGroup) ne compte pas comme « ma tâche en cours »
+const myCurrent = () => S.myId ? S.tasks.find(t => t.status === "taken" && t.assignee === S.myId && !t.isGroup) : null;
+const myGroups = () => S.myId ? S.tasks.filter(t => t.status === "taken" && t.assignee === S.myId && t.isGroup) : [];
+const stepsOf = t => S.stepsBy[t.id] || [];
+const childrenOf = t => S.tasks.filter(c => c.parentId === t.id);
+const parentOf = t => t.parentId ? S.tasks.find(p => p.id === t.parentId) : null;
+const hasParts = t => stepsOf(t).length + childrenOf(t).length > 0;
+const pendingChildren = t => childrenOf(t).filter(c => c.status !== "done").length;
+// avancement : automatique (étapes cochées + sous-tâches) s'il y a un découpage, sinon le curseur
+function pct(t) {
+  if (t.status === "done") return 100;
+  const st = stepsOf(t), ch = childrenOf(t), n = st.length + ch.length;
+  if (n) return Math.round((st.filter(s => s.done).length * 100 + ch.reduce((a, c) => a + pct(c), 0)) / n);
+  return Math.max(0, Math.min(100, Math.round(+t.progress || 0)));
+}
+const canSplit = t => S.myId && ((t.status === "taken" && t.assignee === S.myId) || (S.isAdmin && (t.status === "open" || t.status === "taken")));
 const P = v => "⁦" + v + "%⁩"; // isolé LTR pour l’affichage RTL
 
 function nameOf(id) {
@@ -243,7 +272,8 @@ function armed(key, label, armedLabel, onGo, cls) {
 
 /* ---------- actions ---------- */
 async function take(taskId) {
-  if (myCurrent()) { location.hash = "#my-task"; return toast("أنهِ مهمتك الحالية أولاً 😉"); }
+  const tk = S.tasks.find(x => x.id === taskId);
+  if (myCurrent() && !(tk && tk.isGroup)) { location.hash = "#my-task"; return toast("أنهِ مهمتك الحالية أولاً 😉"); }
   const ok = await write(taskId, () => api("POST", `/api/tasks/${taskId}/take`));
   if (ok) { toast("انطلق! 🚀"); location.hash = "#my-task"; }
 }
@@ -289,6 +319,21 @@ async function release(t) {
 async function approve(t) { await write(t.id, () => api("POST", `/api/tasks/${t.id}/approve`), "تم قبول الاقتراح ✓"); }
 async function remove(t, msg) { await write(t.id, () => api("DELETE", `/api/tasks/${t.id}`), msg || "حُذفت"); }
 async function reopen(t) { await write(t.id, () => api("POST", `/api/tasks/${t.id}/reopen`), "أُعيد فتح المهمة"); }
+
+/* découpage */
+async function addSub(t, mode) {
+  const title = (S.subDraft[t.id] || "").trim();
+  if (!title) { const el = document.querySelector(`[data-key="sub-${t.id}"]`); if (el) el.focus(); return toast("اكتب عنوان المهمة الفرعية"); }
+  const ok = await write(t.id, () => api("POST", `/api/tasks/${t.id}/subtasks`, { title, mode }),
+    mode === "share" ? "أُرسلت إلى المهام المتاحة 🎲" : "أُضيفت الخطوة ✓");
+  if (ok) { S.subDraft[t.id] = ""; render(); const el = document.querySelector(`[data-key="sub-${t.id}"]`); if (el) el.focus({ preventScroll: true }); }
+}
+async function toggleStep(t, s) {
+  s.done = !s.done; render();
+  await write("s" + s.id, () => api("POST", `/api/steps/${s.id}/toggle`, { done: s.done }));
+}
+async function delStep(s) { await write("s" + s.id, () => api("DELETE", `/api/steps/${s.id}`), "حُذفت الخطوة"); }
+async function shareStep(s) { await write("s" + s.id, () => api("POST", `/api/steps/${s.id}/share`), "أُرسلت إلى المهام المتاحة 🎲"); }
 
 /* ---------- modals ---------- */
 function closeModal() { $("#modal").replaceChildren(); }
@@ -351,7 +396,8 @@ function randomPick() {
 
 /* ---------- views ---------- */
 function stats() {
-  const active = S.tasks.filter(t => t.status === "open" || t.status === "taken" || t.status === "done");
+  // les tâches mères ne comptent pas en double : leurs sous-tâches sont comptées à leur place
+  const active = S.tasks.filter(t => !t.isGroup && (t.status === "open" || t.status === "taken" || t.status === "done"));
   const total = active.length, done = active.filter(t => t.status === "done").length;
   const p = total ? Math.round(active.reduce((a, t) => a + (t.status === "open" ? 0 : pct(t)), 0) / total) : 0;
   return { total, done, p };
@@ -362,6 +408,82 @@ function taskMeta(t) {
   return h("div", { class: "meta" },
     t.proposedBy ? [avatar(t.proposedBy), h("span", {}, `${t.status === "proposed" ? "اقترحها" : "أضافها"} ${nameOf(t.proposedBy)}`)] : null,
     t.createdAt ? h("span", {}, "· " + ago(t.createdAt)) : null);
+}
+function crumb(t) {
+  const p = parentOf(t);
+  return p ? h("div", { class: "crumb" }, "↳ جزء من: " + p.title) : null;
+}
+
+/* bloc « المهام الفرعية » : étapes (pour soi) + sous-tâches (pour l'équipe) */
+function subtasksBlock(t, opts) {
+  const editable = opts && opts.editable && canSplit(t);
+  const canCheck = t.status === "taken" && t.assignee === S.myId;
+  const steps = stepsOf(t), kids = childrenOf(t);
+  if (!editable && !steps.length && !kids.length) return null;
+  const rows = [];
+  for (const s of steps) {
+    rows.push(h("div", { class: "sub" + (s.done ? " done" : "") },
+      h("button", { class: "chk" + (s.done ? " on" : ""), disabled: !canCheck, "aria-label": s.done ? "إلغاء الإنجاز" : "تم", onclick: () => toggleStep(t, s) }, s.done ? "✓" : ""),
+      h("span", { class: "t" }, s.title),
+      editable && !t.parentId ? h("button", { class: "btn sm ghost", title: "إرسالها إلى المهام المتاحة ليسحبها زميل", onclick: () => shareStep(s) }, "للفريق ↗") : null,
+      editable ? armed("dels-" + s.id, "✕", "حذف؟", () => delStep(s)) : null));
+  }
+  for (const c of kids) {
+    const who = c.status === "open" ? h("span", { class: "who" }, "في المتاحة 🎲")
+      : c.status === "done" ? h("span", { class: "who" }, avatar(c.assignee), "✓ " + nameOf(c.assignee))
+      : h("span", { class: "who" }, avatar(c.assignee), h("div", { class: "pbar mini" }, h("div", { style: `width:${pct(c)}%` })), P(pct(c)));
+    rows.push(h("div", { class: "sub" + (c.status === "done" ? " done" : "") },
+      h("span", { class: "chk" + (c.status === "done" ? " on" : ""), style: "cursor:default" }, c.status === "done" ? "✓" : "👥"),
+      h("span", { class: "t" }, c.title), who,
+      editable && c.status === "open" ? armed("delc-" + c.id, "✕", "حذف؟", () => remove(c, "حُذفت المهمة الفرعية")) : null));
+  }
+  const out = [h("label", { class: "lbl" }, "🧩 المهام الفرعية", hasParts(t) ? h("span", { class: "auto" }, ` (${steps.filter(s => s.done).length + kids.filter(c => c.status === "done").length}/${steps.length + kids.length})`) : null)];
+  if (!rows.length && editable) out.push(h("p", { class: "hint" }, t.parentId
+    ? "قسّم هذه المهمة إلى خطوات تنجزها بنفسك."
+    : "قسّم المهمة: أضف خطوات تنجزها بنفسك ✓، أو مهاماً فرعية يسحبها زملاؤك 🎲."));
+  if (rows.length) out.push(h("div", { class: "subs" }, rows));
+  if (editable) {
+    const inp = h("input", { type: "text", maxlength: "140", "data-key": "sub-" + t.id, placeholder: "مثال: طباعة الملصقات",
+      value: S.subDraft[t.id] || "", oninput: e => { S.subDraft[t.id] = e.target.value; },
+      onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); addSub(t, "step"); } } });
+    out.push(h("div", { class: "sub-add" }, inp,
+      h("button", { class: "btn sm", onclick: () => addSub(t, "step") }, "＋ خطوة لي"),
+      t.parentId ? null : h("button", { class: "btn sm primary", onclick: () => addSub(t, "share") }, "＋ للفريق 🎲")));
+  }
+  return out;
+}
+
+/* carte de travail : ma tâche en cours, ou une tâche mère que je coordonne */
+function workCard(t) {
+  const v = pct(t);
+  const auto = hasParts(t);
+  const pending = pendingChildren(t);
+  const fill = h("div", { style: `width:${v}%` });
+  const bar = h("div", { class: "pbar" + (v >= 100 ? " done" : "") }, fill);
+  const num = h("span", { class: "pct" }, P(v));
+  const manual = auto ? null : [
+    h("input", { type: "range", min: "0", max: "100", step: "5", value: String(v), "data-key": "range-" + t.id, "aria-label": "التقدم",
+      oninput: e => { const x = +e.target.value; num.textContent = P(x); fill.style.width = x + "%"; bar.className = "pbar" + (x >= 100 ? " done" : ""); },
+      onpointerdown: () => { S.dragging = true; },
+      onchange: e => { S.dragging = false; setProgress(t, +e.target.value); if (S.renderQueued) { S.renderQueued = false; scheduleRender(); } } }),
+    h("div", { class: "quick" }, [0, 25, 50, 75, 100].map(q => h("button", { class: "btn" + (v === q ? " on" : ""), onclick: () => setProgress(t, q) }, P(q))))];
+  const ta = h("textarea", { "data-key": "notes-" + t.id, placeholder: "ما أنجزته، أين وصلت المهمة، روابط، صعوبات، معلومات للزملاء…",
+    value: S.drafts[t.id] !== undefined ? S.drafts[t.id] : (t.notes || ""),
+    oninput: e => onNoteInput(t, e.target), onblur: () => { clearTimeout(noteTimers[t.id]); saveNotes(t); } });
+  return h("div", { class: t.isGroup ? "card" : "card hero", style: t.isGroup ? "border:2px solid var(--line)" : null },
+    h("div", { class: "row" }, h("span", { class: "chip" + (t.isGroup ? " warn" : "") }, t.isGroup ? "أنسّقها" : "جارية"), h("span", { class: "muted small" }, "أُخذت " + ago(t.takenAt))),
+    h("div", { style: "margin-top:10px" }, crumb(t), h("h2", {}, t.title)),
+    t.desc ? h("p", { class: "desc" }, t.desc) : null,
+    taskMeta(t),
+    h("div", { class: "pbig" }, h("strong", {}, "نسبة الإنجاز", auto ? h("div", { class: "auto" }, "تُحسب تلقائياً من المهام الفرعية") : null), num), bar, manual,
+    subtasksBlock(t, { editable: true }),
+    h("label", { class: "lbl" }, "📝 قسمي"),
+    ta, h("div", { class: "savestate", "data-save": t.id }),
+    h("div", { class: "btns" },
+      pending
+        ? h("button", { class: "btn", style: "flex:1", disabled: true }, `⏳ بانتظار المهام الفرعية (${pending})`)
+        : h("button", { class: "btn ok", style: "flex:1", onclick: () => finish(t) }, v >= 100 ? "✓ إنهاء — اكتملت!" : "✓ تحديدها كمنجزة"),
+      armed("rel-" + t.id, "إعادتها إلى المتاحة", "متأكد؟ اضغط مجدداً", () => release(t))));
 }
 
 function viewMine() {
@@ -379,29 +501,13 @@ function viewMine() {
         n ? h("button", { class: "btn primary", onclick: randomPick, disabled: !S.canWrite }, "🎲 سحب عشوائي") : null,
         n ? h("a", { class: "btn", href: "#pool" }, "اختر من القائمة") : h("button", { class: "btn primary", onclick: () => openTaskForm(S.isAdmin ? "add" : "propose") }, "💡 اقتراح مهمة"))));
   } else {
-    const v = pct(t);
-    const fill = h("div", { style: `width:${v}%` });
-    const bar = h("div", { class: "pbar" + (v >= 100 ? " done" : "") }, fill);
-    const num = h("span", { class: "pct" }, P(v));
-    const range = h("input", { type: "range", min: "0", max: "100", step: "5", value: String(v), "data-key": "range-" + t.id, "aria-label": "التقدم",
-      oninput: e => { const x = +e.target.value; num.textContent = P(x); fill.style.width = x + "%"; bar.className = "pbar" + (x >= 100 ? " done" : ""); },
-      onpointerdown: () => { S.dragging = true; },
-      onchange: e => { S.dragging = false; setProgress(t, +e.target.value); if (S.renderQueued) { S.renderQueued = false; scheduleRender(); } } });
-    const quick = h("div", { class: "quick" }, [0, 25, 50, 75, 100].map(q => h("button", { class: "btn" + (v === q ? " on" : ""), onclick: () => setProgress(t, q) }, P(q))));
-    const ta = h("textarea", { "data-key": "notes-" + t.id, placeholder: "ما أنجزته، أين وصلت المهمة، روابط، صعوبات، معلومات للزملاء…",
-      value: S.drafts[t.id] !== undefined ? S.drafts[t.id] : (t.notes || ""),
-      oninput: e => onNoteInput(t, e.target), onblur: () => { clearTimeout(noteTimers[t.id]); saveNotes(t); } });
-    out.push(h("div", { class: "card hero" },
-      h("div", { class: "row" }, h("span", { class: "chip" }, "جارية"), h("span", { class: "muted small" }, "أُخذت " + ago(t.takenAt))),
-      h("h2", { style: "margin-top:10px" }, t.title),
-      t.desc ? h("p", { class: "desc" }, t.desc) : null,
-      taskMeta(t),
-      h("div", { class: "pbig" }, h("strong", {}, "نسبة الإنجاز"), num), bar, range, quick,
-      h("label", { class: "lbl" }, "📝 قسمي"),
-      ta, h("div", { class: "savestate", "data-save": t.id }),
-      h("div", { class: "btns" },
-        h("button", { class: "btn ok", style: "flex:1", onclick: () => finish(t) }, v >= 100 ? "✓ إنهاء — اكتملت!" : "✓ تحديدها كمنجزة"),
-        armed("rel-" + t.id, "إعادتها إلى المتاحة", "متأكد؟ اضغط مجدداً", () => release(t)))));
+    out.push(workCard(t));
+  }
+  const groups = myGroups();
+  if (groups.length) {
+    out.push(h("div", { class: "sec" }, h("h2", {}, `مهام أنسّقها (${groups.length})`)));
+    out.push(h("p", { class: "hint", style: "margin:-6px 2px 10px" }, "مهام قسّمتها على الفريق: تابع تقدّمها، وأنهِها عندما تكتمل كل مهامها الفرعية. يمكنك في الأثناء سحب مهمة أخرى."));
+    for (const g of groups) out.push(workCard(g));
   }
   const mineDone = S.myId ? S.tasks.filter(x => x.status === "done" && x.assignee === S.myId).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)) : [];
   if (mineDone.length) {
@@ -434,13 +540,15 @@ function viewPool() {
   for (const t of pool) {
     out.push(h("div", { class: "card" },
       h("div", { class: "row", style: "align-items:flex-start" },
-        h("div", { class: "grow" }, h("h3", {}, t.title), t.desc ? h("p", { class: "desc small" }, t.desc) : null),
+        h("div", { class: "grow" }, crumb(t), h("h3", {}, t.title), t.desc ? h("p", { class: "desc small" }, t.desc) : null),
         S.isAdmin ? h("button", { class: "icon-btn", title: "تعديل", "aria-label": "تعديل", onclick: () => openTaskForm("edit", t) }, "✏️") : null),
       (pct(t) > 0 || t.notes) ? h("span", { class: "resume" }, `↺ استئناف: أُنجز ${P(pct(t))}` + (t.notes ? " · توجد ملاحظات" : "")) : null,
       t.notes ? h("details", {}, h("summary", {}, "عرض الملاحظات السابقة"), h("div", { class: "notes" }, t.notes)) : null,
+      subtasksBlock(t, { editable: !!S.openSplit[t.id] }),
       taskMeta(t),
       h("div", { class: "btns" },
-        h("button", { class: "btn primary", style: "flex:1", disabled: !!cur || !S.canWrite || !S.myId, onclick: () => take(t.id) }, "✋ سحب هذه المهمة"),
+        h("button", { class: "btn primary", style: "flex:1", disabled: (!!cur && !t.isGroup) || !S.canWrite || !S.myId, onclick: () => take(t.id) }, t.isGroup ? "✋ تنسيق هذه المهمة" : "✋ سحب هذه المهمة"),
+        S.isAdmin ? h("button", { class: "btn sm" + (S.openSplit[t.id] ? " primary" : ""), onclick: () => { S.openSplit[t.id] = !S.openSplit[t.id]; render(); } }, "🧩 تقسيم") : null,
         S.isAdmin ? armed("del-" + t.id, "حذف", "حذف؟", () => remove(t), "danger") : null)));
   }
   return out;
@@ -455,8 +563,9 @@ function viewTeam() {
     out.push(h("div", { class: "card" },
       h("div", { class: "row" }, avatar(t.assignee, true), h("div", { class: "grow" }, h("strong", {}, nameOf(t.assignee)), h("div", { class: "muted small" }, ago(t.takenAt))),
         h("strong", { style: "direction:ltr" }, P(pct(t)))),
-      h("h3", { style: "margin:12px 0 8px" }, t.title),
+      h("div", { style: "margin:12px 0 8px" }, crumb(t), h("h3", {}, t.title, t.isGroup ? h("span", { class: "chip warn", style: "margin-inline-start:8px" }, "يُنسّقها") : null)),
       pbar(t),
+      subtasksBlock(t),
       h("details", { open: !!t.notes && taken.length <= 3 }, h("summary", {}, "قسمه"),
         h("div", { class: "notes" }, t.notes || "لا توجد معلومات بعد."),
         t.desc ? h("p", { class: "muted small" }, "التعليمات: " + t.desc) : null),
@@ -655,7 +764,10 @@ async function refresh(force) {
       S.me = d.me; S.myId = d.me.id; S.isAdmin = d.me.isAdmin; S.joinCode = d.joinCode || "";
       S.userList = d.users; S.users = Object.fromEntries(d.users.map(u => [u.id, u]));
       S.tasks = d.tasks.map(t => ({ id: t.id, title: t.title, desc: t.descr, status: t.status, proposedBy: t.proposed_by, assignee: t.assignee,
-        progress: t.progress, notes: t.notes, createdAt: t.created_at, takenAt: t.taken_at, doneAt: t.done_at }));
+        progress: t.progress, notes: t.notes, createdAt: t.created_at, takenAt: t.taken_at, doneAt: t.done_at,
+        parentId: t.parent_id, isGroup: !!t.is_group }));
+      S.stepsBy = {};
+      for (const s of d.steps || []) (S.stepsBy[s.task_id] = S.stepsBy[s.task_id] || []).push(s);
       S.loaded = true;
     } catch (e) {
       if (e.status === 401) S.authed = false; else S.error = e.code || "error";

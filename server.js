@@ -47,8 +47,23 @@ async function migrate() {
       done_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- sous-tâches : une tâche « mère » (is_group) peut avoir des sous-tâches partagées dans la pioche
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT FALSE;
+    CREATE INDEX IF NOT EXISTS tasks_parent_idx ON tasks(parent_id);
+    -- étapes : petite checklist gardée par la personne qui a la tâche
+    CREATE TABLE IF NOT EXISTS steps (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS steps_task_idx ON steps(task_id);
     -- une seule tâche en cours par personne, garanti par la base
-    CREATE UNIQUE INDEX IF NOT EXISTS one_taken_task_per_user ON tasks(assignee) WHERE status = 'taken';
+    -- (une tâche mère qu'on coordonne ne compte pas : on peut piocher une tâche en plus)
+    DROP INDEX IF EXISTS one_taken_task_per_user;
+    CREATE UNIQUE INDEX IF NOT EXISTS one_current_task_per_user ON tasks(assignee) WHERE status = 'taken' AND NOT is_group;
   `);
   const u = process.env.ADMIN_USERNAME, p = process.env.ADMIN_PASSWORD;
   if (u && p) {
@@ -177,19 +192,21 @@ app.post("/api/logout", (req, res) => {
 });
 
 app.get("/api/state", auth, wrap(async (req, res) => {
-  const [users, tasks] = await Promise.all([
+  const [users, tasks, steps] = await Promise.all([
     pool.query("SELECT id, display_name, is_admin FROM users ORDER BY display_name"),
-    pool.query(`SELECT id, title, descr, status, proposed_by, assignee, progress, notes,
+    pool.query(`SELECT id, title, descr, status, proposed_by, assignee, progress, notes, parent_id, is_group,
       (extract(epoch from created_at)*1000)::bigint AS created_at,
       (extract(epoch from taken_at)*1000)::bigint AS taken_at,
       (extract(epoch from done_at)*1000)::bigint AS done_at
       FROM tasks ORDER BY id`),
+    pool.query("SELECT id, task_id, title, done FROM steps ORDER BY id"),
   ]);
   res.json({
     me: { id: req.user.id, displayName: req.user.display_name, username: req.user.username, isAdmin: req.user.is_admin },
     joinCode: req.user.is_admin ? JOIN_CODE : undefined,
     users: users.rows,
     tasks: tasks.rows.map(t => ({ ...t, created_at: +t.created_at || null, taken_at: +t.taken_at || null, done_at: +t.done_at || null })),
+    steps: steps.rows,
   });
 }));
 
@@ -251,10 +268,18 @@ app.post("/api/tasks/:id/notes", auth, wrap(async (req, res) => {
   done(res, r.rowCount);
 }));
 
+// terminer : seulement quand toutes les sous-tâches partagées sont terminées
 app.post("/api/tasks/:id/finish", auth, wrap(async (req, res) => {
-  const r = await pool.query("UPDATE tasks SET status='done', progress=100, done_at=now(), updated_at=now() WHERE id=$1 AND status='taken' AND assignee=$2",
-    [+req.params.id || 0, req.user.id]);
-  done(res, r.rowCount);
+  const id = +req.params.id || 0;
+  const r = await pool.query(`UPDATE tasks SET status='done', progress=100, done_at=now(), updated_at=now()
+    WHERE id=$1 AND status='taken' AND assignee=$2
+    AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_id=$1 AND c.status<>'done')`, [id, req.user.id]);
+  if (!r.rowCount) {
+    const { rowCount } = await pool.query("SELECT 1 FROM tasks WHERE parent_id=$1 AND status<>'done'", [id]);
+    return res.status(409).json({ error: rowCount ? "subtasks_pending" : "not_allowed" });
+  }
+  await pool.query("UPDATE steps SET done=TRUE WHERE task_id=$1", [id]);
+  broadcast(); res.json({ ok: true });
 }));
 
 // remettre dans la pioche : la personne elle-même ou l'admin (avancement et notes conservés)
@@ -270,15 +295,85 @@ app.post("/api/tasks/:id/approve", auth, adminOnly, wrap(async (req, res) => {
 }));
 
 app.post("/api/tasks/:id/reopen", auth, adminOnly, wrap(async (req, res) => {
-  const r = await pool.query("UPDATE tasks SET status='open', assignee=NULL, progress=0, done_at=NULL, updated_at=now() WHERE id=$1 AND status='done'", [+req.params.id || 0]);
+  const id = +req.params.id || 0;
+  const r = await pool.query("UPDATE tasks SET status='open', assignee=NULL, progress=0, done_at=NULL, updated_at=now() WHERE id=$1 AND status='done'", [id]);
+  if (r.rowCount) await pool.query("UPDATE steps SET done=FALSE WHERE task_id=$1", [id]);
   done(res, r.rowCount);
 }));
 
-// supprimer : admin, ou auteur qui retire sa proposition
+// supprimer : admin, auteur qui retire sa proposition,
+// ou responsable de la tâche mère qui retire une sous-tâche encore dans la pioche
 app.delete("/api/tasks/:id", auth, wrap(async (req, res) => {
-  const r = await pool.query("DELETE FROM tasks WHERE id=$1 AND ($2 OR (status='proposed' AND proposed_by=$3))",
+  const r = await pool.query(`DELETE FROM tasks WHERE id=$1 AND ($2
+    OR (status='proposed' AND proposed_by=$3)
+    OR (status='open' AND parent_id IN (SELECT id FROM tasks WHERE status='taken' AND assignee=$3)))`,
     [+req.params.id || 0, req.user.is_admin, req.user.id]);
   done(res, r.rowCount);
+}));
+
+/* ---------- découpage : étapes (pour soi) et sous-tâches (pour l'équipe) ---------- */
+async function tx(fn) {
+  const c = await pool.connect();
+  try { await c.query("BEGIN"); const out = await fn(c); await c.query("COMMIT"); return out; }
+  catch (e) { await c.query("ROLLBACK").catch(() => {}); throw e; }
+  finally { c.release(); }
+}
+// peut découper : la personne qui a la tâche en cours, ou l'admin (tâche libre ou en cours)
+const canSplit = (t, u) => t && ((t.status === "taken" && t.assignee === u.id) || (u.is_admin && (t.status === "open" || t.status === "taken")));
+async function shareChild(c, parent, title, userId) {
+  await c.query("INSERT INTO tasks (title, status, proposed_by, parent_id) VALUES ($1,'open',$2,$3)", [title, userId, parent.id]);
+  await c.query("UPDATE tasks SET is_group=TRUE, updated_at=now() WHERE id=$1", [parent.id]);
+}
+
+app.post("/api/tasks/:id/subtasks", auth, wrap(async (req, res) => {
+  const title = str(req.body.title, 140);
+  if (!title) return res.status(400).json({ error: "title_required" });
+  const share = req.body.mode === "share";
+  const err = await tx(async c => {
+    const { rows } = await c.query("SELECT * FROM tasks WHERE id=$1 FOR UPDATE", [+req.params.id || 0]);
+    const t = rows[0];
+    if (!canSplit(t, req.user)) return "not_allowed";
+    if (share) {
+      if (t.parent_id) return "no_nested";
+      await shareChild(c, t, title, req.user.id);
+    } else {
+      await c.query("INSERT INTO steps (task_id, title) VALUES ($1,$2)", [t.id, title]);
+    }
+    await c.query("UPDATE tasks SET updated_at=now() WHERE id=$1", [t.id]);
+    return null;
+  });
+  if (err) return res.status(err === "no_nested" ? 400 : 409).json({ error: err });
+  broadcast(); res.json({ ok: true });
+}));
+
+// cocher / décocher une étape : seulement la personne qui a la tâche en cours
+app.post("/api/steps/:id/toggle", auth, wrap(async (req, res) => {
+  const r = await pool.query(`UPDATE steps s SET done=$1 FROM tasks t
+    WHERE s.id=$2 AND t.id=s.task_id AND t.status='taken' AND t.assignee=$3`,
+    [!!req.body.done, +req.params.id || 0, req.user.id]);
+  done(res, r.rowCount);
+}));
+
+app.delete("/api/steps/:id", auth, wrap(async (req, res) => {
+  const r = await pool.query(`DELETE FROM steps s USING tasks t
+    WHERE s.id=$1 AND t.id=s.task_id AND ((t.status='taken' AND t.assignee=$2) OR ($3 AND t.status IN ('open','taken')))`,
+    [+req.params.id || 0, req.user.id, req.user.is_admin]);
+  done(res, r.rowCount);
+}));
+
+// transformer une étape en sous-tâche partagée dans la pioche
+app.post("/api/steps/:id/share", auth, wrap(async (req, res) => {
+  const err = await tx(async c => {
+    const { rows } = await c.query("SELECT s.id AS step_id, s.title AS step_title, t.* FROM steps s JOIN tasks t ON t.id=s.task_id WHERE s.id=$1 FOR UPDATE OF t", [+req.params.id || 0]);
+    const t = rows[0];
+    if (!canSplit(t, req.user)) return "not_allowed";
+    if (t.parent_id) return "no_nested";
+    await shareChild(c, t, t.step_title, req.user.id);
+    await c.query("DELETE FROM steps WHERE id=$1", [t.step_id]);
+    return null;
+  });
+  if (err) return res.status(err === "no_nested" ? 400 : 409).json({ error: err });
+  broadcast(); res.json({ ok: true });
 }));
 
 /* ---------- gestion de l'équipe (admin) ---------- */
