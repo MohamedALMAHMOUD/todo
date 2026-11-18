@@ -60,6 +60,7 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS steps_task_idx ON steps(task_id);
+    ALTER TABLE steps ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
     -- une seule tâche en cours par personne, garanti par la base
     -- (une tâche mère qu'on coordonne ne compte pas : on peut piocher une tâche en plus)
     DROP INDEX IF EXISTS one_taken_task_per_user;
@@ -199,7 +200,7 @@ app.get("/api/state", auth, wrap(async (req, res) => {
       (extract(epoch from taken_at)*1000)::bigint AS taken_at,
       (extract(epoch from done_at)*1000)::bigint AS done_at
       FROM tasks ORDER BY id`),
-    pool.query("SELECT id, task_id, title, done FROM steps ORDER BY id"),
+    pool.query("SELECT id, task_id, title, done, notes FROM steps ORDER BY id"),
   ]);
   res.json({
     me: { id: req.user.id, displayName: req.user.display_name, username: req.user.username, isAdmin: req.user.is_admin },
@@ -320,8 +321,8 @@ async function tx(fn) {
 }
 // peut découper : la personne qui a la tâche en cours, ou l'admin (tâche libre ou en cours)
 const canSplit = (t, u) => t && ((t.status === "taken" && t.assignee === u.id) || (u.is_admin && (t.status === "open" || t.status === "taken")));
-async function shareChild(c, parent, title, userId) {
-  await c.query("INSERT INTO tasks (title, status, proposed_by, parent_id) VALUES ($1,'open',$2,$3)", [title, userId, parent.id]);
+async function shareChild(c, parent, title, userId, descr) {
+  await c.query("INSERT INTO tasks (title, descr, status, proposed_by, parent_id) VALUES ($1,$2,'open',$3,$4)", [title, descr || "", userId, parent.id]);
   await c.query("UPDATE tasks SET is_group=TRUE, updated_at=now() WHERE id=$1", [parent.id]);
 }
 
@@ -354,6 +355,22 @@ app.post("/api/steps/:id/toggle", auth, wrap(async (req, res) => {
   done(res, r.rowCount);
 }));
 
+// texte d'une étape : la personne qui a (ou a eu) la tâche, ou l'admin
+app.post("/api/steps/:id/notes", auth, wrap(async (req, res) => {
+  const r = await pool.query(`UPDATE steps s SET notes=$1 FROM tasks t
+    WHERE s.id=$2 AND t.id=s.task_id AND ((t.assignee=$3 AND t.status IN ('taken','done')) OR ($4 AND t.status<>'proposed'))`,
+    [String(req.body.notes || "").slice(0, 8000), +req.params.id || 0, req.user.id, req.user.is_admin]);
+  done(res, r.rowCount);
+}));
+
+// consignes d'une sous-tâche partagée : le responsable de la tâche mère, ou l'admin
+app.post("/api/tasks/:id/descr", auth, wrap(async (req, res) => {
+  const r = await pool.query(`UPDATE tasks SET descr=$1, updated_at=now()
+    WHERE id=$2 AND parent_id IS NOT NULL AND ($3 OR parent_id IN (SELECT id FROM tasks WHERE status='taken' AND assignee=$4))`,
+    [str(req.body.desc, 8000), +req.params.id || 0, req.user.is_admin, req.user.id]);
+  done(res, r.rowCount);
+}));
+
 app.delete("/api/steps/:id", auth, wrap(async (req, res) => {
   const r = await pool.query(`DELETE FROM steps s USING tasks t
     WHERE s.id=$1 AND t.id=s.task_id AND ((t.status='taken' AND t.assignee=$2) OR ($3 AND t.status IN ('open','taken')))`,
@@ -364,11 +381,12 @@ app.delete("/api/steps/:id", auth, wrap(async (req, res) => {
 // transformer une étape en sous-tâche partagée dans la pioche
 app.post("/api/steps/:id/share", auth, wrap(async (req, res) => {
   const err = await tx(async c => {
-    const { rows } = await c.query("SELECT s.id AS step_id, s.title AS step_title, t.* FROM steps s JOIN tasks t ON t.id=s.task_id WHERE s.id=$1 FOR UPDATE OF t", [+req.params.id || 0]);
+    const { rows } = await c.query("SELECT s.id AS step_id, s.title AS step_title, s.notes AS step_notes, t.* FROM steps s JOIN tasks t ON t.id=s.task_id WHERE s.id=$1 FOR UPDATE OF t", [+req.params.id || 0]);
     const t = rows[0];
     if (!canSplit(t, req.user)) return "not_allowed";
     if (t.parent_id) return "no_nested";
-    await shareChild(c, t, t.step_title, req.user.id);
+    // le texte de l'étape devient les consignes de la sous-tâche
+    await shareChild(c, t, t.step_title, req.user.id, t.step_notes);
     await c.query("DELETE FROM steps WHERE id=$1", [t.step_id]);
     return null;
   });

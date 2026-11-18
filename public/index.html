@@ -112,8 +112,16 @@ details[open] summary::before{content:"▾ ";}
 .skeleton{height:90px;border-radius:var(--radius);background:linear-gradient(90deg,var(--card),var(--line),var(--card));background-size:200% 100%;animation:sh 1.2s infinite;margin-bottom:12px}
 @keyframes sh{to{background-position:-200% 0}}
 .subs{display:flex;flex-direction:column;gap:6px;margin-top:6px}
-.sub{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:var(--bg);font-size:15px}
-.sub .t{flex:1;min-width:0;overflow-wrap:anywhere}
+.subw{border-radius:12px;background:var(--bg)}
+.subw.open{outline:1px solid var(--line)}
+.sub{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:15px}
+.sub .t{flex:1;min-width:0;overflow-wrap:anywhere;appearance:none;border:none;background:none;padding:4px 0;text-align:start;cursor:pointer;font:inherit;color:inherit;display:flex;align-items:center;gap:6px}
+.sub .t .ic{font-size:13px;opacity:.55;flex:none}
+.sub .t .ic.has{opacity:1}
+.subp{padding:0 10px 10px}
+.subp textarea{min-height:80px;background:var(--card)}
+.subp .lbl2{display:block;font-size:13px;font-weight:800;margin:6px 0 4px;color:var(--muted)}
+.subp .notes{background:var(--card);margin-top:0}
 .sub.done .t{text-decoration:line-through;color:var(--muted)}
 .sub .who{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex:none}
 .chk{appearance:none;width:28px;height:28px;border-radius:8px;border:2px solid var(--line);background:var(--card);cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#fff;padding:0}
@@ -181,7 +189,7 @@ function confetti() {
 const S = {
   me: null, myId: null, isAdmin: false, canWrite: true, joinCode: "",
   tasks: [], users: {}, userList: [], stepsBy: {}, loaded: false, stale: false, error: null, authed: null,
-  drafts: {}, saving: {}, subDraft: {}, openSplit: {}, armed: null, dragging: false, renderQueued: false,
+  drafts: {}, saving: {}, subDraft: {}, openSplit: {}, openSub: {}, armed: null, dragging: false, renderQueued: false,
 };
 const ERR = {
   not_logged_in: "انتهت الجلسة، سجّل الدخول من جديد.", bad_credentials: "اسم المستخدم أو كلمة المرور غير صحيحة.",
@@ -332,6 +340,24 @@ async function toggleStep(t, s) {
   s.done = !s.done; render();
   await write("s" + s.id, () => api("POST", `/api/steps/${s.id}/toggle`, { done: s.done }));
 }
+/* champ de texte enregistré automatiquement (texte d'une étape, consignes d'une sous-tâche) */
+async function saveField(key, current, doSave) {
+  const v = S.drafts[key];
+  if (v === undefined) return;
+  if (v === current) { delete S.drafts[key]; updateSaveState(key); return; }
+  S.saving[key] = true; updateSaveState(key);
+  const ok = await write(key, () => doSave(v));
+  S.saving[key] = false;
+  if (ok && S.drafts[key] === v) delete S.drafts[key];
+  updateSaveState(key);
+}
+function autoText(key, current, doSave, placeholder) {
+  return [h("textarea", { "data-key": "f-" + key, maxlength: "8000", placeholder,
+    value: S.drafts[key] !== undefined ? S.drafts[key] : current,
+    oninput: e => { S.drafts[key] = e.target.value; updateSaveState(key); clearTimeout(noteTimers[key]); noteTimers[key] = setTimeout(() => saveField(key, current, doSave), 1500); },
+    onblur: () => { clearTimeout(noteTimers[key]); saveField(key, current, doSave); } }),
+    h("div", { class: "savestate", "data-save": key })];
+}
 async function delStep(s) { await write("s" + s.id, () => api("DELETE", `/api/steps/${s.id}`), "حُذفت الخطوة"); }
 async function shareStep(s) { await write("s" + s.id, () => api("POST", `/api/steps/${s.id}/share`), "أُرسلت إلى المهام المتاحة 🎲"); }
 
@@ -420,22 +446,43 @@ function subtasksBlock(t, opts) {
   const canCheck = t.status === "taken" && t.assignee === S.myId;
   const steps = stepsOf(t), kids = childrenOf(t);
   if (!editable && !steps.length && !kids.length) return null;
+  // chaque sous-tâche a son texte : on l'ouvre en touchant son titre
+  const isOpen = key => !!S.openSub[key] || S.drafts[key] !== undefined;
+  const toggle = key => () => { S.openSub[key] = !isOpen(key); if (!S.openSub[key]) delete S.openSub[key]; render(); };
+  const titleBtn = (key, title, hasText) => h("button", { class: "t", "aria-expanded": String(isOpen(key)), onclick: toggle(key) },
+    h("span", {}, title), h("span", { class: "ic" + (hasText ? " has" : ""), title: hasText ? "يوجد نص" : "إضافة نص" }, isOpen(key) ? "▾" : "📝"));
   const rows = [];
   for (const s of steps) {
-    rows.push(h("div", { class: "sub" + (s.done ? " done" : "") },
-      h("button", { class: "chk" + (s.done ? " on" : ""), disabled: !canCheck, "aria-label": s.done ? "إلغاء الإنجاز" : "تم", onclick: () => toggleStep(t, s) }, s.done ? "✓" : ""),
-      h("span", { class: "t" }, s.title),
-      editable && !t.parentId ? h("button", { class: "btn sm ghost", title: "إرسالها إلى المهام المتاحة ليسحبها زميل", onclick: () => shareStep(s) }, "للفريق ↗") : null,
-      editable ? armed("dels-" + s.id, "✕", "حذف؟", () => delStep(s)) : null));
+    const key = "st" + s.id;
+    const canText = (t.assignee === S.myId && (t.status === "taken" || t.status === "done")) || (S.isAdmin && t.status !== "proposed");
+    rows.push(h("div", { class: "subw" + (isOpen(key) ? " open" : "") },
+      h("div", { class: "sub" + (s.done ? " done" : "") },
+        h("button", { class: "chk" + (s.done ? " on" : ""), disabled: !canCheck, "aria-label": s.done ? "إلغاء الإنجاز" : "تم", onclick: () => toggleStep(t, s) }, s.done ? "✓" : ""),
+        titleBtn(key, s.title, !!s.notes),
+        editable && !t.parentId ? h("button", { class: "btn sm ghost", title: "إرسالها إلى المهام المتاحة ليسحبها زميل", onclick: () => shareStep(s) }, "للفريق ↗") : null,
+        editable ? armed("dels-" + s.id, "✕", "حذف؟", () => delStep(s)) : null),
+      isOpen(key) ? h("div", { class: "subp" },
+        canText
+          ? autoText(key, s.notes || "", v => api("POST", `/api/steps/${s.id}/notes`, { notes: v }), "ما أنجزته في هذه الخطوة، تفاصيل، روابط…")
+          : h("div", { class: "notes" }, s.notes || "لا يوجد نص بعد.")) : null));
   }
   for (const c of kids) {
+    const key = "cd" + c.id;
     const who = c.status === "open" ? h("span", { class: "who" }, "في المتاحة 🎲")
       : c.status === "done" ? h("span", { class: "who" }, avatar(c.assignee), "✓ " + nameOf(c.assignee))
       : h("span", { class: "who" }, avatar(c.assignee), h("div", { class: "pbar mini" }, h("div", { style: `width:${pct(c)}%` })), P(pct(c)));
-    rows.push(h("div", { class: "sub" + (c.status === "done" ? " done" : "") },
-      h("span", { class: "chk" + (c.status === "done" ? " on" : ""), style: "cursor:default" }, c.status === "done" ? "✓" : "👥"),
-      h("span", { class: "t" }, c.title), who,
-      editable && c.status === "open" ? armed("delc-" + c.id, "✕", "حذف؟", () => remove(c, "حُذفت المهمة الفرعية")) : null));
+    const canDesc = S.isAdmin || (t.status === "taken" && t.assignee === S.myId);
+    rows.push(h("div", { class: "subw" + (isOpen(key) ? " open" : "") },
+      h("div", { class: "sub" + (c.status === "done" ? " done" : "") },
+        h("span", { class: "chk" + (c.status === "done" ? " on" : ""), style: "cursor:default" }, c.status === "done" ? "✓" : "👥"),
+        titleBtn(key, c.title, !!(c.desc || c.notes)), who,
+        editable && c.status === "open" ? armed("delc-" + c.id, "✕", "حذف؟", () => remove(c, "حُذفت المهمة الفرعية")) : null),
+      isOpen(key) ? h("div", { class: "subp" },
+        h("span", { class: "lbl2" }, "📋 التعليمات"),
+        canDesc
+          ? autoText(key, c.desc || "", v => api("POST", `/api/tasks/${c.id}/descr`, { desc: v }), "ما المطلوب في هذه المهمة الفرعية؟ يراه من يسحبها.")
+          : h("div", { class: "notes" }, c.desc || "لا توجد تعليمات."),
+        c.assignee ? [h("span", { class: "lbl2" }, "📝 قسم " + nameOf(c.assignee)), h("div", { class: "notes" }, c.notes || "لا توجد معلومات بعد.")] : null) : null));
   }
   const out = [h("label", { class: "lbl" }, "🧩 المهام الفرعية", hasParts(t) ? h("span", { class: "auto" }, ` (${steps.filter(s => s.done).length + kids.filter(c => c.status === "done").length}/${steps.length + kids.length})`) : null)];
   if (!rows.length && editable) out.push(h("p", { class: "hint" }, t.parentId
